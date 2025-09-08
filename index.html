@@ -1,0 +1,426 @@
+<!doctype html>
+<html lang="pt">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Painel Operacional</title>
+
+  <!-- PWA -->
+  <link rel="manifest" href="/manifest.webmanifest">
+  <meta name="theme-color" content="#0b1020" />
+  <!-- iOS PWA -->
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="Painel" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <!-- Opcional: ícone iOS -->
+  <!-- <link rel="apple-touch-icon" href="/icons/icon-180.png" /> -->
+
+  <style>
+    :root { --bg:#0b1020; --card:#11162a; --muted:#a2a9c3; --accent:#3b82f6; }
+    * { box-sizing: border-box; }
+    body { margin:0; background:var(--bg); color:#fff; font: 15px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+    .wrap { max-width:1200px; margin:0 auto; padding:16px; }
+    .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; justify-content:space-between; }
+    .card { background:var(--card); border-radius:12px; padding:16px; margin-top:16px; }
+    .grid2 { display:grid; gap:16px; grid-template-columns:repeat(2,minmax(0,1fr)); }
+    .grid4 { display:grid; gap:12px; grid-template-columns:repeat(4,minmax(0,1fr)); }
+    @media (max-width:900px){ .grid2,.grid4 { grid-template-columns:1fr; } }
+    .muted { color:var(--muted); font-size:13px; }
+    .input, select, textarea { background:#0f1530; border:1px solid #2a3550; color:#fff; border-radius:8px; padding:8px 10px; width:100%; }
+    textarea { min-height:70px; resize:vertical; }
+    .btn { background:var(--accent); color:#fff; border:0; border-radius:8px; padding:8px 12px; font-weight:600; cursor:pointer; }
+    .btn-ghost { background:transparent; color:#fff; border:1px solid #2a3550; border-radius:8px; padding:8px 12px; cursor:pointer; }
+    table { width:100%; border-collapse:collapse; font-size:14px; }
+    th, td { border-bottom:1px solid #233; padding:8px; vertical-align:top; }
+    thead th { position:sticky; top:0; background:#0f1530; }
+    .scroll { max-height:360px; overflow:auto; border:1px solid #233; border-radius:8px; }
+    .badge { background:#1f2a44; border-radius:6px; padding:2px 6px; font-size:12px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="row">
+      <div>
+        <h1 style="margin:8px 0">Painel Operacional</h1>
+        <div class="muted">Avarias e Encomendas — 112 teares</div>
+      </div>
+      <div style="display:flex; gap:8px; align-items:center;">
+        <button class="btn" id="btnExportJSON">Exportar JSON</button>
+        <button class="btn" id="btnExportCSV">Exportar CSV</button>
+        <label class="btn-ghost" style="cursor:pointer">
+          Importar JSON
+          <input type="file" id="importJson" accept="application/json" style="display:none" />
+        </label>
+      </div>
+    </div>
+
+    <!-- Seleção de Tear -->
+    <div class="card">
+      <div class="grid4">
+        <div>
+          <label style="display:block; margin-bottom:6px">Tear</label>
+          <select id="selTear"></select>
+        </div>
+        <div>
+          <label style="display:block; margin-bottom:6px">Nome</label>
+          <input class="input" id="inpTearNome" readonly />
+        </div>
+      </div>
+    </div>
+
+    <div class="grid2">
+      <!-- Nova Avaria -->
+      <div class="card">
+        <h3>Nova Avaria</h3>
+        <div class="grid4">
+          <div><label>Data</label><input class="input" type="date" id="avData" /></div>
+          <div><label>Hora</label><input class="input" type="time" id="avHora" /></div>
+          <div>
+            <label>Tipo</label>
+            <select class="input" id="avTipo">
+              <option>Mecânica</option><option>Elétrica</option><option>Outros</option>
+            </select>
+          </div>
+          <div><label>Paragem (h)</label><input class="input" type="number" step="0.1" min="0" id="avParagem" /></div>
+          <div style="grid-column:1/-1"><label>Descrição</label><textarea class="input" id="avDesc"></textarea></div>
+          <div><label>Técnico</label><input class="input" id="avTec" /></div>
+          <div style="grid-column:1/-1; display:flex; gap:8px;">
+            <button class="btn" id="btnAddAvaria">Adicionar</button>
+            <button class="btn-ghost" id="btnClearAvaria">Limpar</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Lista Avarias -->
+      <div class="card">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <h3 style="margin:0">Registos (Avarias)</h3>
+          <div class="muted" id="avResumo"></div>
+        </div>
+        <div class="scroll">
+          <table>
+            <thead><tr>
+              <th>Data</th><th>Hora</th><th>Tipo</th><th>Descrição</th><th>Técnico</th><th>Paragem (h)</th><th></th>
+            </tr></thead>
+            <tbody id="tbAvarias"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid2">
+      <!-- Nova Encomenda -->
+      <div class="card">
+        <h3>Nova Encomenda</h3>
+        <div class="grid4">
+          <div><label>Data</label><input class="input" type="date" id="enData" /></div>
+          <div><label>Cliente</label><input class="input" id="enCliente" /></div>
+          <div><label>Produto</label><input class="input" id="enProduto" /></div>
+          <div><label>Qtd (m)</label><input class="input" type="number" min="0" id="enQtd" /></div>
+          <div><label>Largura (cm)</label><input class="input" type="number" min="0" id="enLarg" /></div>
+          <div>
+            <label>Prioridade</label>
+            <select class="input" id="enPrior">
+              <option>Alta</option><option selected>Média</option><option>Baixa</option>
+            </select>
+          </div>
+          <div style="grid-column:1/-1"><label>Observações</label><textarea class="input" id="enObs"></textarea></div>
+          <div style="grid-column:1/-1; display:flex; gap:8px;">
+            <button class="btn" id="btnAddEncomenda">Adicionar</button>
+            <button class="btn-ghost" id="btnClearEncomenda">Limpar</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Lista Encomendas -->
+      <div class="card">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <h3 style="margin:0">Registos (Encomendas)</h3>
+          <div class="muted" id="enResumo"></div>
+        </div>
+        <div class="scroll">
+          <table>
+            <thead><tr>
+              <th>Data</th><th>Cliente</th><th>Produto</th><th>Qtd (m)</th><th>Largura (cm)</th><th>Prioridade</th><th>Observações</th><th></th>
+            </tr></thead>
+            <tbody id="tbEncomendas"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <script>
+    // ---- Helpers / Estado
+    const TEARES = Array.from({ length: 112 }, (_, i) => ({
+      codigo: "TEC-" + String(i + 1).padStart(3, "0"),
+      nome: "Tear " + String(i + 1).padStart(2, "0"),
+    }));
+    const LS = { av:"mw_avarias", en:"mw_encomendas", sel:"mw_selected_tear" };
+    const uid = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
+    const todayISO = () => new Date().toISOString().slice(0,10);
+    const nowHM = () => { const d=new Date(); return String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0"); };
+
+    const selTear = document.getElementById("selTear");
+    const inpTearNome = document.getElementById("inpTearNome");
+
+    const avData = document.getElementById("avData");
+    const avHora = document.getElementById("avHora");
+    const avTipo = document.getElementById("avTipo");
+    const avParagem = document.getElementById("avParagem");
+    const avDesc = document.getElementById("avDesc");
+    const avTec = document.getElementById("avTec");
+    const tbAvarias = document.getElementById("tbAvarias");
+    const avResumo = document.getElementById("avResumo");
+
+    const enData = document.getElementById("enData");
+    const enCliente = document.getElementById("enCliente");
+    const enProduto = document.getElementById("enProduto");
+    const enQtd = document.getElementById("enQtd");
+    const enLarg = document.getElementById("enLarg");
+    const enPrior = document.getElementById("enPrior");
+    const enObs = document.getElementById("enObs");
+    const tbEncomendas = document.getElementById("tbEncomendas");
+    const enResumo = document.getElementById("enResumo");
+
+    const btnAddAvaria = document.getElementById("btnAddAvaria");
+    const btnClearAvaria = document.getElementById("btnClearAvaria");
+    const btnAddEncomenda = document.getElementById("btnAddEncomenda");
+    const btnClearEncomenda = document.getElementById("btnClearEncomenda");
+
+    const btnExportJSON = document.getElementById("btnExportJSON");
+    const btnExportCSV = document.getElementById("btnExportCSV");
+    const importJson = document.getElementById("importJson");
+
+    function loadLS(key, fallback) {
+      try { return JSON.parse(localStorage.getItem(key) || JSON.stringify(fallback)); }
+      catch { return fallback; }
+    }
+    function saveLS(key, value) { localStorage.setItem(key, JSON.stringify(value)); }
+
+    let avarias = loadLS(LS.av, []);
+    let encomendas = loadLS(LS.en, []);
+    let selectedTear = localStorage.getItem(LS.sel) || TEARES[0].codigo;
+
+    // Popular dropdown
+    TEARES.forEach(t => {
+      const opt = document.createElement("option");
+      opt.value = t.codigo; opt.textContent = `${t.codigo} — ${t.nome}`;
+      selTear.appendChild(opt);
+    });
+    selTear.value = selectedTear;
+    inpTearNome.value = (TEARES.find(t=>t.codigo===selectedTear)||{}).nome || "";
+
+    function setFormDefaults() {
+      avData.value = todayISO();
+      avHora.value = nowHM();
+      avParagem.value = "0";
+      avDesc.value = "";
+      avTec.value = "";
+
+      enData.value = todayISO();
+      enCliente.value = "";
+      enProduto.value = "";
+      enQtd.value = "0";
+      enLarg.value = "242";
+      enPrior.value = "Média";
+      enObs.value = "";
+    }
+    setFormDefaults();
+
+    selTear.addEventListener("change", () => {
+      selectedTear = selTear.value;
+      localStorage.setItem(LS.sel, selectedTear);
+      inpTearNome.value = (TEARES.find(t=>t.codigo===selectedTear)||{}).nome || "";
+      renderTables();
+    });
+
+    function renderTables() {
+      // Avarias
+      const avTear = avarias.filter(a => a.tear === selectedTear);
+      tbAvarias.innerHTML = "";
+      let total = 0;
+      avTear.forEach(a => {
+        total += Number(a.tempoParagem)||0;
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${a.data}</td>
+          <td>${a.hora}</td>
+          <td>${a.tipo}</td>
+          <td title="${a.descricao.replace(/"/g,'&quot;')}" style="max-width:420px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis">${a.descricao}</td>
+          <td>${a.tecnico||""}</td>
+          <td>${(Number(a.tempoParagem)||0).toFixed(2)}</td>
+          <td style="text-align:right">
+            <button class="btn-ghost" data-act="dup-av" data-id="${a.id}">Duplicar</button>
+            <button class="btn-ghost" data-act="del-av" data-id="${a.id}">Apagar</button>
+          </td>
+        `;
+        tbAvarias.appendChild(tr);
+      });
+      if (!avTear.length) {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `<td class="muted" colspan="7">Sem registos.</td>`;
+        tbAvarias.appendChild(tr);
+      }
+      avResumo.textContent = `${avTear.length} registos • Total paragem: ${total.toFixed(2)} h`;
+
+      // Encomendas
+      const enTear = encomendas.filter(e => e.tear === selectedTear);
+      tbEncomendas.innerHTML = "";
+      enTear.forEach(e => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${e.data}</td>
+          <td>${e.cliente}</td>
+          <td>${e.produto}</td>
+          <td>${e.quantidadeM}</td>
+          <td>${e.larguraCm}</td>
+          <td><span class="badge">${e.prioridade}</span></td>
+          <td title="${(e.observacoes||"").replace(/"/g,'&quot;')}" style="max-width:420px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis">${e.observacoes||""}</td>
+          <td style="text-align:right">
+            <button class="btn-ghost" data-act="dup-en" data-id="${e.id}">Duplicar</button>
+            <button class="btn-ghost" data-act="del-en" data-id="${e.id}">Apagar</button>
+          </td>
+        `;
+        tbEncomendas.appendChild(tr);
+      });
+      if (!enTear.length) {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `<td class="muted" colspan="8">Sem encomendas.</td>`;
+        tbEncomendas.appendChild(tr);
+      }
+      enResumo.textContent = `${enTear.length} registos`;
+    }
+    renderTables();
+
+    // Add/Clear
+    btnAddAvaria.addEventListener("click", () => {
+      if (!avData.value || !avHora.value || !avDesc.value) return alert("Preenche Data, Hora e Descrição.");
+      const novo = {
+        id: uid(),
+        data: avData.value,
+        hora: avHora.value,
+        tear: selectedTear,
+        equipamento: (TEARES.find(t=>t.codigo===selectedTear)||{}).nome || "",
+        localizacao: "Tecelagem",
+        tipo: avTipo.value || "Outros",
+        descricao: avDesc.value,
+        tecnico: avTec.value || "",
+        tempoParagem: Number(avParagem.value)||0
+      };
+      avarias = [novo, ...avarias];
+      saveLS(LS.av, avarias);
+      setFormDefaults();
+      renderTables();
+    });
+    btnClearAvaria.addEventListener("click", setFormDefaults);
+
+    btnAddEncomenda.addEventListener("click", () => {
+      if (!enData.value || !enCliente.value || !enProduto.value) return alert("Preenche Data, Cliente e Produto.");
+      const nova = {
+        id: uid(),
+        data: enData.value,
+        cliente: enCliente.value,
+        produto: enProduto.value,
+        quantidadeM: Number(enQtd.value)||0,
+        larguraCm: Number(enLarg.value)||0,
+        prioridade: enPrior.value || "Média",
+        tear: selectedTear,
+        observacoes: enObs.value || ""
+      };
+      encomendas = [nova, ...encomendas];
+      saveLS(LS.en, encomendas);
+      setFormDefaults();
+      renderTables();
+    });
+    btnClearEncomenda.addEventListener("click", setFormDefaults);
+
+    // Tabelas - duplicar/apagar via delegação
+    tbAvarias.addEventListener("click", (e) => {
+      const b = e.target.closest("button"); if (!b) return;
+      const id = b.dataset.id, act = b.dataset.act;
+      if (act === "del-av") {
+        avarias = avarias.filter(a => a.id !== id);
+        saveLS(LS.av, avarias);
+        renderTables();
+      } else if (act === "dup-av") {
+        const a = avarias.find(x => x.id === id); if (!a) return;
+        const copy = { ...a, id: uid(), data: todayISO(), hora: nowHM() };
+        avarias = [copy, ...avarias];
+        saveLS(LS.av, avarias);
+        renderTables();
+      }
+    });
+    tbEncomendas.addEventListener("click", (e) => {
+      const b = e.target.closest("button"); if (!b) return;
+      const id = b.dataset.id, act = b.dataset.act;
+      if (act === "del-en") {
+        encomendas = encomendas.filter(x => x.id !== id);
+        saveLS(LS.en, encomendas);
+        renderTables();
+      } else if (act === "dup-en") {
+        const x = encomendas.find(x => x.id === id); if (!x) return;
+        const copy = { ...x, id: uid(), data: todayISO() };
+        encomendas = [copy, ...encomendas];
+        saveLS(LS.en, encomendas);
+        renderTables();
+      }
+    });
+
+    // Export/Import
+    btnExportJSON.addEventListener("click", () => {
+      const payload = { avarias, encomendas };
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type:"application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a"); a.href = url;
+      a.download = "manutencao_"+todayISO()+".json"; document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+    });
+    function toCSV(rows) {
+      if (!rows.length) return "";
+      const headers = Object.keys(rows[0]);
+      const esc = (v) => {
+        if (v == null) return "";
+        const s = String(v);
+        return (s.includes(",") || s.includes("\n") || s.includes('"')) ? '"' + s.replace(/"/g,'""') + '"' : s;
+      };
+      return [headers.join(","), ...rows.map(r => headers.map(h => esc(r[h])).join(","))].join("\n");
+    }
+    btnExportCSV.addEventListener("click", () => {
+      const csvA = toCSV(avarias) || "id,data,hora,tear,equipamento,localizacao,tipo,descricao,tecnico,tempoParagem\n";
+      const csvE = toCSV(encomendas) || "id,data,cliente,produto,quantidadeM,larguraCm,prioridade,tear,observacoes\n";
+      const dl = (name, text) => {
+        const blob = new Blob([text], { type:"text/csv" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a"); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+        URL.revokeObjectURL(url);
+      };
+      dl("avarias.csv", csvA);
+      dl("encomendas.csv", csvE);
+    });
+
+    importJson.addEventListener("change", (e) => {
+      const file = e.target.files?.[0]; if (!file) return;
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const obj = JSON.parse(String(reader.result));
+          if (Array.isArray(obj.avarias)) avarias = obj.avarias;
+          if (Array.isArray(obj.encomendas)) encomendas = obj.encomendas;
+          saveLS(LS.av, avarias); saveLS(LS.en, encomendas);
+          renderTables();
+        } catch { alert("Ficheiro inválido."); }
+      };
+      reader.readAsText(file);
+    });
+
+    // Registar SW (PWA)
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => {
+        navigator.serviceWorker.register("/sw.js").catch(()=>{});
+      });
+    }
+  </script>
+</body>
+</html>
