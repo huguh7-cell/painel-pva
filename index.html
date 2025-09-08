@@ -6,19 +6,19 @@
   <title>Painel Operacional</title>
 
   <!-- PWA -->
-  <link rel="manifest" href="/manifest.webmanifest"><link rel="apple-touch-icon" href="/icons/icon-180.png" />
+  <link rel="manifest" href="/manifest.webmanifest">
   <meta name="theme-color" content="#0b1020" />
   <!-- iOS PWA -->
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-title" content="Painel" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <!-- Opcional: ícone iOS -->
-  <!-- <link rel="apple-touch-icon" href="/icons/icon-180.png" /> -->
+  <!-- Ícone iOS (opcional) -->
+  <link rel="apple-touch-icon" sizes="180x180" href="/icons/icon-180.png?v=2" />
 
   <style>
     :root { --bg:#0b1020; --card:#11162a; --muted:#a2a9c3; --accent:#3b82f6; }
     * { box-sizing: border-box; }
-    body { margin:0; background:var(--bg); color:#fff; font: 15px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+    body { margin:0; background:var(--bg); color:#fff; font:15px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
     .wrap { max-width:1200px; margin:0 auto; padding:16px; }
     .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; justify-content:space-between; }
     .card { background:var(--card); border-radius:12px; padding:16px; margin-top:16px; }
@@ -35,6 +35,10 @@
     thead th { position:sticky; top:0; background:#0f1530; }
     .scroll { max-height:360px; overflow:auto; border:1px solid #233; border-radius:8px; }
     .badge { background:#1f2a44; border-radius:6px; padding:2px 6px; font-size:12px; }
+    /* Filtros */
+    .toolbar { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:8px 0 12px; }
+    .btn-ghost.active { outline:2px solid #3b82f6; }
+    .toolbar-spacer { color:var(--muted); }
   </style>
 </head>
 <body>
@@ -45,8 +49,8 @@
         <div class="muted">Avarias e Encomendas — 112 teares</div>
       </div>
       <div style="display:flex; gap:8px; align-items:center;">
-        <button class="btn" id="btnExportJSON">Exportar JSON</button>
-        <button class="btn" id="btnExportCSV">Exportar CSV</button>
+        <button class="btn" id="btnExportJSON">Exportar JSON (tudo)</button>
+        <button class="btn" id="btnExportCSV">Exportar CSV (tudo)</button>
         <label class="btn-ghost" style="cursor:pointer">
           Importar JSON
           <input type="file" id="importJson" accept="application/json" style="display:none" />
@@ -97,6 +101,20 @@
           <h3 style="margin:0">Registos (Avarias)</h3>
           <div class="muted" id="avResumo"></div>
         </div>
+
+        <!-- Filtros Avarias -->
+        <div class="toolbar" id="avToolbar">
+          <button class="btn-ghost" data-range="today">Hoje</button>
+          <button class="btn-ghost" data-range="7d">Últimos 7 dias</button>
+          <button class="btn-ghost" data-range="month">Este mês</button>
+          <button class="btn-ghost active" data-range="all">Tudo</button>
+          <span class="toolbar-spacer">|</span>
+          <button class="btn-ghost active" data-scope="tear">Este tear</button>
+          <button class="btn-ghost" data-scope="all">Todos os teares</button>
+          <span class="toolbar-spacer">|</span>
+          <button class="btn-ghost" id="btnCsvAvariasVisivel">Exportar CSV (visível)</button>
+        </div>
+
         <div class="scroll">
           <table>
             <thead><tr>
@@ -138,6 +156,20 @@
           <h3 style="margin:0">Registos (Encomendas)</h3>
           <div class="muted" id="enResumo"></div>
         </div>
+
+        <!-- Filtros Encomendas -->
+        <div class="toolbar" id="enToolbar">
+          <button class="btn-ghost" data-range="today">Hoje</button>
+          <button class="btn-ghost" data-range="7d">Últimos 7 dias</button>
+          <button class="btn-ghost" data-range="month">Este mês</button>
+          <button class="btn-ghost active" data-range="all">Tudo</button>
+          <span class="toolbar-spacer">|</span>
+          <button class="btn-ghost active" data-scope="tear">Este tear</button>
+          <button class="btn-ghost" data-scope="all">Todos os teares</button>
+          <span class="toolbar-spacer">|</span>
+          <button class="btn-ghost" id="btnCsvEncomendasVisivel">Exportar CSV (visível)</button>
+        </div>
+
         <div class="scroll">
           <table>
             <thead><tr>
@@ -152,7 +184,7 @@
   </div>
 
   <script>
-    // ---- Helpers / Estado
+    // ---- Helpers / Estado base
     const TEARES = Array.from({ length: 112 }, (_, i) => ({
       codigo: "TEC-" + String(i + 1).padStart(3, "0"),
       nome: "Tear " + String(i + 1).padStart(2, "0"),
@@ -161,7 +193,20 @@
     const uid = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
     const todayISO = () => new Date().toISOString().slice(0,10);
     const nowHM = () => { const d=new Date(); return String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0"); };
+    function startOfMonthISO(d=new Date()){ const x=new Date(d.getFullYear(), d.getMonth(), 1); return x.toISOString().slice(0,10); }
+    function addDaysISO(dateISO, delta){ const d=new Date(dateISO+"T00:00:00"); d.setDate(d.getDate()+delta); return d.toISOString().slice(0,10); }
+    function toCSV(rows){
+      if(!rows.length) return "";
+      const headers = Object.keys(rows[0]);
+      const esc = (v)=>{ if(v==null) return ""; const s=String(v); return (s.includes(",")||s.includes("\n")||s.includes('"'))?'"'+s.replace(/"/g,'""')+'"':s; };
+      return [headers.join(","), ...rows.map(r=>headers.map(h=>esc(r[h])).join(","))].join("\n");
+    }
+    function download(name, text, type="text/plain"){
+      const blob=new Blob([text],{type}); const url=URL.createObjectURL(blob);
+      const a=document.createElement("a"); a.href=url; a.download=name; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+    }
 
+    // ---- Elementos
     const selTear = document.getElementById("selTear");
     const inpTearNome = document.getElementById("inpTearNome");
 
@@ -173,6 +218,8 @@
     const avTec = document.getElementById("avTec");
     const tbAvarias = document.getElementById("tbAvarias");
     const avResumo = document.getElementById("avResumo");
+    const avToolbar = document.getElementById("avToolbar");
+    const btnCsvAvariasVisivel = document.getElementById("btnCsvAvariasVisivel");
 
     const enData = document.getElementById("enData");
     const enCliente = document.getElementById("enCliente");
@@ -183,6 +230,8 @@
     const enObs = document.getElementById("enObs");
     const tbEncomendas = document.getElementById("tbEncomendas");
     const enResumo = document.getElementById("enResumo");
+    const enToolbar = document.getElementById("enToolbar");
+    const btnCsvEncomendasVisivel = document.getElementById("btnCsvEncomendasVisivel");
 
     const btnAddAvaria = document.getElementById("btnAddAvaria");
     const btnClearAvaria = document.getElementById("btnClearAvaria");
@@ -193,17 +242,15 @@
     const btnExportCSV = document.getElementById("btnExportCSV");
     const importJson = document.getElementById("importJson");
 
-    function loadLS(key, fallback) {
-      try { return JSON.parse(localStorage.getItem(key) || JSON.stringify(fallback)); }
-      catch { return fallback; }
-    }
-    function saveLS(key, value) { localStorage.setItem(key, JSON.stringify(value)); }
+    // ---- LS
+    function loadLS(key, fallback){ try{ return JSON.parse(localStorage.getItem(key) || JSON.stringify(fallback)); } catch{ return fallback; } }
+    function saveLS(key, value){ localStorage.setItem(key, JSON.stringify(value)); }
 
     let avarias = loadLS(LS.av, []);
     let encomendas = loadLS(LS.en, []);
     let selectedTear = localStorage.getItem(LS.sel) || TEARES[0].codigo;
 
-    // Popular dropdown
+    // Dropdown teares
     TEARES.forEach(t => {
       const opt = document.createElement("option");
       opt.value = t.codigo; opt.textContent = `${t.codigo} — ${t.nome}`;
@@ -212,23 +259,6 @@
     selTear.value = selectedTear;
     inpTearNome.value = (TEARES.find(t=>t.codigo===selectedTear)||{}).nome || "";
 
-    function setFormDefaults() {
-      avData.value = todayISO();
-      avHora.value = nowHM();
-      avParagem.value = "0";
-      avDesc.value = "";
-      avTec.value = "";
-
-      enData.value = todayISO();
-      enCliente.value = "";
-      enProduto.value = "";
-      enQtd.value = "0";
-      enLarg.value = "242";
-      enPrior.value = "Média";
-      enObs.value = "";
-    }
-    setFormDefaults();
-
     selTear.addEventListener("change", () => {
       selectedTear = selTear.value;
       localStorage.setItem(LS.sel, selectedTear);
@@ -236,65 +266,51 @@
       renderTables();
     });
 
-    function renderTables() {
-      // Avarias
-      const avTear = avarias.filter(a => a.tear === selectedTear);
-      tbAvarias.innerHTML = "";
-      let total = 0;
-      avTear.forEach(a => {
-        total += Number(a.tempoParagem)||0;
-        const tr = document.createElement("tr");
-        tr.innerHTML = `
-          <td>${a.data}</td>
-          <td>${a.hora}</td>
-          <td>${a.tipo}</td>
-          <td title="${a.descricao.replace(/"/g,'&quot;')}" style="max-width:420px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis">${a.descricao}</td>
-          <td>${a.tecnico||""}</td>
-          <td>${(Number(a.tempoParagem)||0).toFixed(2)}</td>
-          <td style="text-align:right">
-            <button class="btn-ghost" data-act="dup-av" data-id="${a.id}">Duplicar</button>
-            <button class="btn-ghost" data-act="del-av" data-id="${a.id}">Apagar</button>
-          </td>
-        `;
-        tbAvarias.appendChild(tr);
-      });
-      if (!avTear.length) {
-        const tr = document.createElement("tr");
-        tr.innerHTML = `<td class="muted" colspan="7">Sem registos.</td>`;
-        tbAvarias.appendChild(tr);
-      }
-      avResumo.textContent = `${avTear.length} registos • Total paragem: ${total.toFixed(2)} h`;
-
-      // Encomendas
-      const enTear = encomendas.filter(e => e.tear === selectedTear);
-      tbEncomendas.innerHTML = "";
-      enTear.forEach(e => {
-        const tr = document.createElement("tr");
-        tr.innerHTML = `
-          <td>${e.data}</td>
-          <td>${e.cliente}</td>
-          <td>${e.produto}</td>
-          <td>${e.quantidadeM}</td>
-          <td>${e.larguraCm}</td>
-          <td><span class="badge">${e.prioridade}</span></td>
-          <td title="${(e.observacoes||"").replace(/"/g,'&quot;')}" style="max-width:420px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis">${e.observacoes||""}</td>
-          <td style="text-align:right">
-            <button class="btn-ghost" data-act="dup-en" data-id="${e.id}">Duplicar</button>
-            <button class="btn-ghost" data-act="del-en" data-id="${e.id}">Apagar</button>
-          </td>
-        `;
-        tbEncomendas.appendChild(tr);
-      });
-      if (!enTear.length) {
-        const tr = document.createElement("tr");
-        tr.innerHTML = `<td class="muted" colspan="8">Sem encomendas.</td>`;
-        tbEncomendas.appendChild(tr);
-      }
-      enResumo.textContent = `${enTear.length} registos`;
+    function setFormDefaults() {
+      avData.value = todayISO(); avHora.value = nowHM(); avParagem.value = "0"; avDesc.value = ""; avTec.value = "";
+      enData.value = todayISO(); enCliente.value=""; enProduto.value=""; enQtd.value="0"; enLarg.value="242"; enPrior.value="Média"; enObs.value="";
     }
-    renderTables();
+    setFormDefaults();
 
-    // Add/Clear
+    // ---- Filtros (Avarias)
+    let avRange = "all";   // today | 7d | month | all
+    let avScope = "tear";  // tear  | all
+    if (avToolbar){
+      avToolbar.addEventListener("click", (e)=>{
+        const b=e.target.closest("button"); if(!b) return;
+        if (b.hasAttribute("data-range")) {
+          avRange = b.getAttribute("data-range");
+          avToolbar.querySelectorAll("[data-range]").forEach(x=>x.classList.toggle("active", x===b));
+          renderTables();
+        }
+        if (b.hasAttribute("data-scope")) {
+          avScope = b.getAttribute("data-scope");
+          avToolbar.querySelectorAll("[data-scope]").forEach(x=>x.classList.toggle("active", x===b));
+          renderTables();
+        }
+      });
+    }
+
+    // ---- Filtros (Encomendas)
+    let enRange = "all";   // today | 7d | month | all
+    let enScope = "tear";  // tear  | all
+    if (enToolbar){
+      enToolbar.addEventListener("click", (e)=>{
+        const b=e.target.closest("button"); if(!b) return;
+        if (b.hasAttribute("data-range")) {
+          enRange = b.getAttribute("data-range");
+          enToolbar.querySelectorAll("[data-range]").forEach(x=>x.classList.toggle("active", x===b));
+          renderTables();
+        }
+        if (b.hasAttribute("data-scope")) {
+          enScope = b.getAttribute("data-scope");
+          enToolbar.querySelectorAll("[data-scope]").forEach(x=>x.classList.toggle("active", x===b));
+          renderTables();
+        }
+      });
+    }
+
+    // ---- Ações
     btnAddAvaria.addEventListener("click", () => {
       if (!avData.value || !avHora.value || !avDesc.value) return alert("Preenche Data, Hora e Descrição.");
       const novo = {
@@ -342,14 +358,11 @@
       const id = b.dataset.id, act = b.dataset.act;
       if (act === "del-av") {
         avarias = avarias.filter(a => a.id !== id);
-        saveLS(LS.av, avarias);
-        renderTables();
+        saveLS(LS.av, avarias); renderTables();
       } else if (act === "dup-av") {
         const a = avarias.find(x => x.id === id); if (!a) return;
         const copy = { ...a, id: uid(), data: todayISO(), hora: nowHM() };
-        avarias = [copy, ...avarias];
-        saveLS(LS.av, avarias);
-        renderTables();
+        avarias = [copy, ...avarias]; saveLS(LS.av, avarias); renderTables();
       }
     });
     tbEncomendas.addEventListener("click", (e) => {
@@ -357,49 +370,24 @@
       const id = b.dataset.id, act = b.dataset.act;
       if (act === "del-en") {
         encomendas = encomendas.filter(x => x.id !== id);
-        saveLS(LS.en, encomendas);
-        renderTables();
+        saveLS(LS.en, encomendas); renderTables();
       } else if (act === "dup-en") {
-        const x = encomendas.find(x => x.id === id); if (!x) return;
+        const x = encomendas.find(y => y.id === id); if (!x) return;
         const copy = { ...x, id: uid(), data: todayISO() };
-        encomendas = [copy, ...encomendas];
-        saveLS(LS.en, encomendas);
-        renderTables();
+        encomendas = [copy, ...encomendas]; saveLS(LS.en, encomendas); renderTables();
       }
     });
 
-    // Export/Import
+    // Export/Import (tudo)
     btnExportJSON.addEventListener("click", () => {
-      const payload = { avarias, encomendas };
-      const blob = new Blob([JSON.stringify(payload, null, 2)], { type:"application/json" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a"); a.href = url;
-      a.download = "manutencao_"+todayISO()+".json"; document.body.appendChild(a); a.click(); a.remove();
-      URL.revokeObjectURL(url);
+      download("manutencao_"+todayISO()+".json", JSON.stringify({ avarias, encomendas }, null, 2), "application/json");
     });
-    function toCSV(rows) {
-      if (!rows.length) return "";
-      const headers = Object.keys(rows[0]);
-      const esc = (v) => {
-        if (v == null) return "";
-        const s = String(v);
-        return (s.includes(",") || s.includes("\n") || s.includes('"')) ? '"' + s.replace(/"/g,'""') + '"' : s;
-      };
-      return [headers.join(","), ...rows.map(r => headers.map(h => esc(r[h])).join(","))].join("\n");
-    }
     btnExportCSV.addEventListener("click", () => {
       const csvA = toCSV(avarias) || "id,data,hora,tear,equipamento,localizacao,tipo,descricao,tecnico,tempoParagem\n";
       const csvE = toCSV(encomendas) || "id,data,cliente,produto,quantidadeM,larguraCm,prioridade,tear,observacoes\n";
-      const dl = (name, text) => {
-        const blob = new Blob([text], { type:"text/csv" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a"); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
-        URL.revokeObjectURL(url);
-      };
-      dl("avarias.csv", csvA);
-      dl("encomendas.csv", csvE);
+      download("avarias.csv", csvA, "text/csv");
+      download("encomendas.csv", csvE, "text/csv");
     });
-
     importJson.addEventListener("change", (e) => {
       const file = e.target.files?.[0]; if (!file) return;
       const reader = new FileReader();
@@ -414,6 +402,112 @@
       };
       reader.readAsText(file);
     });
+
+    // Export CSV (visível) — Avarias
+    btnCsvAvariasVisivel.addEventListener("click", ()=>{
+      const base = (avScope==="tear") ? avarias.filter(a=>a.tear===selectedTear) : avarias.slice();
+      const today = todayISO();
+      let fromISO=null, toISO=null;
+      if (avRange==="today"){ fromISO=today; toISO=today; }
+      else if (avRange==="7d"){ fromISO=addDaysISO(today,-6); toISO=today; }
+      else if (avRange==="month"){ fromISO=startOfMonthISO(new Date()); toISO=today; }
+      const filtered = (!fromISO||!toISO) ? base : base.filter(a => (a.data||"")>=fromISO && (a.data||"")<=toISO);
+      const csv = toCSV(filtered) || "id,data,hora,tear,equipamento,localizacao,tipo,descricao,tecnico,tempoParagem\n";
+      download("avarias_visivel.csv", csv, "text/csv");
+    });
+
+    // Export CSV (visível) — Encomendas
+    btnCsvEncomendasVisivel.addEventListener("click", ()=>{
+      const base = (enScope==="tear") ? encomendas.filter(e=>e.tear===selectedTear) : encomendas.slice();
+      const today = todayISO();
+      let fromISO=null, toISO=null;
+      if (enRange==="today"){ fromISO=today; toISO=today; }
+      else if (enRange==="7d"){ fromISO=addDaysISO(today,-6); toISO=today; }
+      else if (enRange==="month"){ fromISO=startOfMonthISO(new Date()); toISO=today; }
+      const filtered = (!fromISO||!toISO) ? base : base.filter(e => (e.data||"")>=fromISO && (e.data||"")<=toISO);
+      const csv = toCSV(filtered) || "id,data,cliente,produto,quantidadeM,larguraCm,prioridade,tear,observacoes\n";
+      download("encomendas_visivel.csv", csv, "text/csv");
+    });
+
+    // Render com filtros
+    function renderTables() {
+      // ===== AVARIAS =====
+      const AV_LIMIT = 100;
+      const baseA = (avScope === "tear") ? avarias.filter(a => a.tear === selectedTear) : avarias.slice();
+      const today = todayISO();
+      let fromISO=null, toISO=null;
+      if (avRange==="today"){ fromISO=today; toISO=today; }
+      else if (avRange==="7d"){ fromISO=addDaysISO(today,-6); toISO=today; }
+      else if (avRange==="month"){ fromISO=startOfMonthISO(new Date()); toISO=today; }
+      const listA = (!fromISO||!toISO) ? baseA : baseA.filter(a => (a.data||"")>=fromISO && (a.data||"")<=toISO);
+
+      tbAvarias.innerHTML = "";
+      let totalA = 0;
+      listA.slice(0, AV_LIMIT).forEach(a=>{
+        totalA += Number(a.tempoParagem)||0;
+        const tr=document.createElement("tr");
+        tr.innerHTML = `
+          <td>${a.data}</td>
+          <td>${a.hora}</td>
+          <td>${a.tipo}</td>
+          <td title="${(a.descricao||"").replace(/"/g,'&quot;')}" style="max-width:420px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis">${a.descricao||""}</td>
+          <td>${a.tecnico||""}</td>
+          <td>${(Number(a.tempoParagem)||0).toFixed(2)}</td>
+          <td style="text-align:right">
+            <button class="btn-ghost" data-act="dup-av" data-id="${a.id}">Duplicar</button>
+            <button class="btn-ghost" data-act="del-av" data-id="${a.id}">Apagar</button>
+          </td>
+        `;
+        tbAvarias.appendChild(tr);
+      });
+      if (!listA.length) {
+        const tr=document.createElement("tr");
+        tr.innerHTML = `<td class="muted" colspan="7">Sem registos para este filtro.</td>`;
+        tbAvarias.appendChild(tr);
+      }
+      const msgA = listA.length>AV_LIMIT ? ` • a mostrar ${Math.min(AV_LIMIT,listA.length)} de ${listA.length}` : "";
+      const scopeA = (avScope==="tear")?`tear ${selectedTear}`:`todos os teares`;
+      const rangeA = avRange==="today"?"hoje":avRange==="7d"?"últimos 7 dias":avRange==="month"?"este mês":"todas as datas";
+      avResumo.textContent = `${listA.length} registos (${scopeA}, ${rangeA}) • Total visível: ${totalA.toFixed(2)} h${msgA}`;
+
+      // ===== ENCOMENDAS =====
+      const EN_LIMIT = 100;
+      const baseE = (enScope === "tear") ? encomendas.filter(e => e.tear === selectedTear) : encomendas.slice();
+      let fromISOe=null, toISOe=null;
+      if (enRange==="today"){ fromISOe=today; toISOe=today; }
+      else if (enRange==="7d"){ fromISOe=addDaysISO(today,-6); toISOe=today; }
+      else if (enRange==="month"){ fromISOe=startOfMonthISO(new Date()); toISOe=today; }
+      const listE = (!fromISOe||!toISOe) ? baseE : baseE.filter(e => (e.data||"")>=fromISOe && (e.data||"")<=toISOe);
+
+      tbEncomendas.innerHTML="";
+      listE.slice(0, EN_LIMIT).forEach(e=>{
+        const tr=document.createElement("tr");
+        tr.innerHTML = `
+          <td>${e.data}</td>
+          <td>${e.cliente}</td>
+          <td>${e.produto}</td>
+          <td>${e.quantidadeM}</td>
+          <td>${e.larguraCm}</td>
+          <td><span class="badge">${e.prioridade}</span></td>
+          <td title="${(e.observacoes||"").replace(/"/g,'&quot;')}" style="max-width:420px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis">${e.observacoes||""}</td>
+          <td style="text-align:right">
+            <button class="btn-ghost" data-act="dup-en" data-id="${e.id}">Duplicar</button>
+            <button class="btn-ghost" data-act="del-en" data-id="${e.id}">Apagar</button>
+          </td>
+        `;
+        tbEncomendas.appendChild(tr);
+      });
+      if (!listE.length){
+        const tr=document.createElement("tr");
+        tr.innerHTML = `<td class="muted" colspan="8">Sem encomendas para este filtro.</td>`;
+        tbEncomendas.appendChild(tr);
+      }
+      const msgE = listE.length>EN_LIMIT ? ` • a mostrar ${Math.min(EN_LIMIT,listE.length)} de ${listE.length}` : "";
+      enResumo.textContent = `${listE.length} registos${msgE}`;
+    }
+
+    // Primeiro render
+    renderTables();
 
     // Registar SW (PWA)
     if ("serviceWorker" in navigator) {
