@@ -378,88 +378,115 @@
     const colEncomendas= () => db.collection("companies").doc(EMPRESA_ID).collection("encomendas");
     const colInvent    = () => db.collection("companies").doc(EMPRESA_ID).collection("inventario");
 
-    // ===== Auth + realtime listeners
-    auth.signInAnonymously().catch(console.error);
+    // ===== Auth + realtime listeners (com erro visível)
+    auth.signInAnonymously().catch((e)=>{ console.error("Auth",e); alert("Erro de autenticação Firebase:\n"+(e?.message||e)); });
     auth.onAuthStateChanged(() => {
-      colAvarias().orderBy("data","desc").orderBy("hora","desc").onSnapshot((snap)=>{
-        avarias = snap.docs.map(d => ({ id:d.id, ...d.data() })); saveLS(LS.av,avarias); renderTables();
-      });
-      colEncomendas().orderBy("data","desc").onSnapshot((snap)=>{
-        encomendas = snap.docs.map(d => ({ id:d.id, ...d.data() })); saveLS(LS.en,encomendas); renderTables();
-      });
-      colInvent().orderBy("nome","asc").onSnapshot((snap)=>{
-        inventario = snap.docs.map(d => ({ id:d.id, ...d.data() })); saveLS(LS.inv,inventario);
-        // popular dropdown de peças
-        const sel = avPeca; const cur = sel.value;
-        sel.innerHTML = `<option value="">— Nenhuma —</option>` + inventario.map(i => `<option value="${i.id}">${i.codigo||""} — ${i.nome||""} (stk:${i.stock??0})</option>`).join("");
-        if (inventario.some(i=>i.id===cur)) sel.value = cur;
-        renderInventario();
-      });
+      colAvarias().orderBy("data","desc").orderBy("hora","desc").onSnapshot(
+        (snap)=>{
+          avarias = snap.docs.map(d => ({ id:d.id, ...d.data() })); saveLS(LS.av,avarias); renderTables();
+        },
+        (err)=>{
+          console.error("Snapshot avarias:", err);
+          alert("Erro a ler Avarias do Firestore:\n" + (err?.message || err));
+        }
+      );
+      colEncomendas().orderBy("data","desc").onSnapshot(
+        (snap)=>{
+          encomendas = snap.docs.map(d => ({ id:d.id, ...d.data() })); saveLS(LS.en,encomendas); renderTables();
+        },
+        (err)=>{
+          console.error("Snapshot encomendas:", err);
+          alert("Erro a ler Encomendas do Firestore:\n" + (err?.message || err));
+        }
+      );
+      colInvent().orderBy("nome","asc").onSnapshot(
+        (snap)=>{
+          inventario = snap.docs.map(d => ({ id:d.id, ...d.data() })); saveLS(LS.inv,inventario);
+          // popular dropdown de peças
+          const sel = avPeca; const cur = sel.value;
+          sel.innerHTML = `<option value="">— Nenhuma —</option>` + inventario.map(i => `<option value="${i.id}">${i.codigo||""} — ${i.nome||""} (stk:${i.stock??0})</option>`).join("");
+          if (inventario.some(i=>i.id===cur)) sel.value = cur;
+          renderInventario();
+        },
+        (err)=>{
+          console.error("Snapshot inventário:", err);
+          alert("Erro a ler Inventário do Firestore:\n" + (err?.message || err));
+        }
+      );
     });
 
     // ===== Inventário: add/update e clear
     btnInvAdd.addEventListener("click", async ()=>{
-      const payload = {
-        codigo: iCodigo.value.trim(),
-        nome: iNome.value.trim(),
-        local: iLocal.value.trim(),
-        stock: Number(iStock.value)||0,
-        min: Number(iMin.value)||0,
-        empresaId: EMPRESA_ID,
-        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-      };
-      if (!payload.nome) { alert("Indica o nome da peça."); return; }
-      if (payload.codigo) {
-        const q = await colInvent().where("codigo","==",payload.codigo).limit(1).get();
-        if (!q.empty) await colInvent().doc(q.docs[0].id).set(payload, { merge:true });
-        else await colInvent().add(payload);
-      } else {
-        await colInvent().add(payload);
-      }
-      setFormDefaults();
+      try{
+        const payload = {
+          codigo: iCodigo.value.trim(),
+          nome: iNome.value.trim(),
+          local: iLocal.value.trim(),
+          stock: Number(iStock.value)||0,
+          min: Number(iMin.value)||0,
+          empresaId: EMPRESA_ID,
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        };
+        if (!payload.nome) { alert("Indica o nome da peça."); return; }
+        if (payload.codigo) {
+          const q = await colInvent().where("codigo","==",payload.codigo).limit(1).get();
+          if (!q.empty) await colInvent().doc(q.docs[0].id).set(payload, { merge:true });
+          else await colInvent().add(payload);
+        } else {
+          await colInvent().add(payload);
+        }
+        setFormDefaults();
+      }catch(e){ console.error(e); alert("Erro ao gravar inventário:\n"+(e?.message||e)); }
     });
     btnInvClear.addEventListener("click", setFormDefaults);
 
-    // ===== Avarias: adicionar (com baixa de stock se peça selecionada)
+    // ===== Avarias: adicionar (com baixa de stock se peça selecionada) — COM try/catch
     btnAddAvaria.addEventListener("click", async ()=>{
-      if (!avData.value || !avHora.value || !avDesc.value) return alert("Preenche Data, Hora e Descrição.");
-      const doc = {
-        data: avData.value, hora: avHora.value, tear: selectedTear,
-        equipamento: (TEARES.find(t=>t.codigo===selectedTear)||{}).nome || "",
-        localizacao: "Tecelagem", tipo: avTipo.value || "Outros",
-        descricao: avDesc.value, tecnico: avTec.value || "",
-        tempoParagem: Number(avParagem.value)||0,
-        empresaId: EMPRESA_ID, createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-        pecaId: avPeca.value || "", pecaQtd: Number(avQtdPeca.value)||0
-      };
+      try{
+        if (!avData.value || !avHora.value || !avDesc.value) return alert("Preenche Data, Hora e Descrição.");
+        const doc = {
+          data: avData.value, hora: avHora.value, tear: selectedTear,
+          equipamento: (TEARES.find(t=>t.codigo===selectedTear)||{}).nome || "",
+          localizacao: "Tecelagem", tipo: avTipo.value || "Outros",
+          descricao: avDesc.value, tecnico: avTec.value || "",
+          tempoParagem: Number(avParagem.value)||0,
+          empresaId: EMPRESA_ID, createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+          pecaId: avPeca.value || "", pecaQtd: Number(avQtdPeca.value)||0
+        };
 
-      if (doc.pecaId && doc.pecaQtd>0) {
-        await db.runTransaction(async (tx)=>{
-          const refInv = colInvent().doc(doc.pecaId);
-          const snapInv = await tx.get(refInv);
-          if (!snapInv.exists) throw new Error("Peça não encontrada.");
-          const cur = snapInv.data();
-          const novo = (Number(cur.stock)||0) - doc.pecaQtd;
-          if (novo < 0) throw new Error(`Stock insuficiente (${cur.stock}) para baixar ${doc.pecaQtd}.`);
-          tx.update(refInv, { stock: novo, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
-        });
+        if (doc.pecaId && doc.pecaQtd>0) {
+          await db.runTransaction(async (tx)=>{
+            const refInv = colInvent().doc(doc.pecaId);
+            const snapInv = await tx.get(refInv);
+            if (!snapInv.exists) throw new Error("Peça não encontrada no inventário.");
+            const cur = snapInv.data();
+            const novo = (Number(cur.stock)||0) - doc.pecaQtd;
+            if (novo < 0) throw new Error(`Stock insuficiente (${cur.stock}) para baixar ${doc.pecaQtd}.`);
+            tx.update(refInv, { stock: novo, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
+          });
+        }
+        await colAvarias().add(doc);
+        setFormDefaults();
+      }catch(err){
+        console.error("Erro a criar avaria:", err);
+        alert("Não foi possível registar a avaria:\n" + (err?.message || err));
       }
-      await colAvarias().add(doc);
-      setFormDefaults();
     });
     btnClearAvaria.addEventListener("click", setFormDefaults);
 
     // ===== Encomendas: adicionar
     btnAddEncomenda.addEventListener("click", async ()=>{
-      if (!enData.value || !enCliente.value || !enProduto.value) return alert("Preenche Data, Cliente e Produto.");
-      const doc = {
-        data: enData.value, cliente: enCliente.value, produto: enProduto.value,
-        quantidadeM: Number(enQtd.value)||0, larguraCm: Number(enLarg.value)||0,
-        prioridade: enPrior.value || "Média", tear: selectedTear, observacoes: enObs.value || "",
-        empresaId: EMPRESA_ID, createdAt: firebase.firestore.FieldValue.serverTimestamp()
-      };
-      await colEncomendas().add(doc);
-      setFormDefaults();
+      try{
+        if (!enData.value || !enCliente.value || !enProduto.value) return alert("Preenche Data, Cliente e Produto.");
+        const doc = {
+          data: enData.value, cliente: enCliente.value, produto: enProduto.value,
+          quantidadeM: Number(enQtd.value)||0, larguraCm: Number(enLarg.value)||0,
+          prioridade: enPrior.value || "Média", tear: selectedTear, observacoes: enObs.value || "",
+          empresaId: EMPRESA_ID, createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        };
+        await colEncomendas().add(doc);
+        setFormDefaults();
+      }catch(e){ console.error(e); alert("Não foi possível registar a encomenda:\n"+(e?.message||e)); }
     });
     btnClearEncomenda.addEventListener("click", setFormDefaults);
 
@@ -467,14 +494,18 @@
     tbAvarias.addEventListener("click", async (e)=>{
       const btn = safeClosest(e.target,"button"); if(!btn) return;
       const id=btn.dataset.id, act=btn.dataset.act;
-      if(act==="del-av"){ await colAvarias().doc(id).delete(); }
-      else if(act==="dup-av"){ const a=avarias.find(x=>x.id===id); if(!a)return; const copy={...a}; delete copy.id; copy.data=todayISO(); copy.hora=nowHM(); copy.createdAt=firebase.firestore.FieldValue.serverTimestamp(); await colAvarias().add(copy); }
+      try{
+        if(act==="del-av"){ await colAvarias().doc(id).delete(); }
+        else if(act==="dup-av"){ const a=avarias.find(x=>x.id===id); if(!a)return; const copy={...a}; delete copy.id; copy.data=todayISO(); copy.hora=nowHM(); copy.createdAt=firebase.firestore.FieldValue.serverTimestamp(); await colAvarias().add(copy); }
+      }catch(err){ alert("Erro:\n"+(err?.message||err)); }
     });
     tbEncomendas.addEventListener("click", async (e)=>{
       const btn = safeClosest(e.target,"button"); if(!btn) return;
       const id=btn.dataset.id, act=btn.dataset.act;
-      if(act==="del-en"){ await colEncomendas().doc(id).delete(); }
-      else if(act==="dup-en"){ const x=encomendas.find(y=>y.id===id); if(!x)return; const copy={...x}; delete copy.id; copy.data=todayISO(); copy.createdAt=firebase.firestore.FieldValue.serverTimestamp(); await colEncomendas().add(copy); }
+      try{
+        if(act==="del-en"){ await colEncomendas().doc(id).delete(); }
+        else if(act==="dup-en"){ const x=encomendas.find(y=>y.id===id); if(!x)return; const copy={...x}; delete copy.id; copy.data=todayISO(); copy.createdAt=firebase.firestore.FieldValue.serverTimestamp(); await colEncomendas().add(copy); }
+      }catch(err){ alert("Erro:\n"+(err?.message||err)); }
     });
 
     // ===== Export/Import (tudo)
@@ -495,7 +526,7 @@
         if(Array.isArray(obj.avarias)) for(const a of obj.avarias) await colAvarias().add({ ...a, empresaId:EMPRESA_ID });
         if(Array.isArray(obj.encomendas)) for(const x of obj.encomendas) await colEncomendas().add({ ...x, empresaId:EMPRESA_ID });
         if(Array.isArray(obj.inventario)) for(const i of obj.inventario) await colInvent().add({ ...i, empresaId:EMPRESA_ID });
-      } catch{ alert("Ficheiro inválido."); } };
+      } catch(err){ alert("Ficheiro inválido ou erro a importar:\n"+(err?.message||err)); } };
       reader.readAsText(file);
     });
 
@@ -629,19 +660,21 @@
     tbInv.addEventListener("click", async (e)=>{
       const btn = safeClosest(e.target,"button"); if(!btn) return;
       const id=btn.dataset.id, act=btn.dataset.act;
-      if (act==="del") {
-        if (confirm("Apagar item do inventário?")) await colInvent().doc(id).delete();
-      } else if (act==="fill") {
-        const it = inventario.find(x=>x.id===id); if (!it) return;
-        iCodigo.value=it.codigo||""; iNome.value=it.nome||""; iLocal.value=it.local||"";
-        iStock.value=it.stock??0; iMin.value=it.min??0;
-      }
+      try{
+        if (act==="del") {
+          if (confirm("Apagar item do inventário?")) await colInvent().doc(id).delete();
+        } else if (act==="fill") {
+          const it = inventario.find(x=>x.id===id); if (!it) return;
+          iCodigo.value=it.codigo||""; iNome.value=it.nome||""; iLocal.value=it.local||"";
+          iStock.value=it.stock??0; iMin.value=it.min??0;
+        }
+      }catch(err){ alert("Erro:\n"+(err?.message||err)); }
     });
 
     // Primeiro render (usa cache até chegar Firestore)
     renderTables();
 
-    // Registar SW (PWA) — v4 para forçar atualização
+    // Service worker v5 (forçar atualização)
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", () => {
         navigator.serviceWorker.register("/sw.js?v=5").catch(()=>{});
