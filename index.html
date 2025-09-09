@@ -1,687 +1,83 @@
-<!doctype html>
-<html lang="pt">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Painel Operacional</title>
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
 
-  <!-- PWA -->
-  <link rel="manifest" href="/manifest.webmanifest">
-  <meta name="theme-color" content="#0b1020" />
-  <meta name="apple-mobile-web-app-capable" content="yes" />
-  <meta name="apple-mobile-web-app-title" content="Painel" />
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <link rel="apple-touch-icon" sizes="180x180" href="/icons/icon-180.png?v=2" />
-
-  <!-- Firebase compat -->
-  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
-
-  <style>
-    :root { --bg:#0b1020; --card:#11162a; --muted:#a2a9c3; --accent:#3b82f6; --danger:#ef4444; --ok:#10b981; }
-    * { box-sizing: border-box; }
-    body { margin:0; background:var(--bg); color:#fff; font:15px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
-    .wrap { max-width:1200px; margin:0 auto; padding:16px; }
-    .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; justify-content:space-between; }
-    .card { background:var(--card); border-radius:12px; padding:16px; margin-top:16px; }
-    .grid2 { display:grid; gap:16px; grid-template-columns:repeat(2,minmax(0,1fr)); }
-    .grid3 { display:grid; gap:16px; grid-template-columns:repeat(3,minmax(0,1fr)); }
-    .grid4 { display:grid; gap:12px; grid-template-columns:repeat(4,minmax(0,1fr)); }
-    @media (max-width:1024px){ .grid3 { grid-template-columns:1fr; } }
-    @media (max-width:900px){ .grid2,.grid4 { grid-template-columns:1fr; } }
-    .muted { color:var(--muted); font-size:13px; }
-    .input, select, textarea { background:#0f1530; border:1px solid #2a3550; color:#fff; border-radius:8px; padding:8px 10px; width:100%; }
-    textarea { min-height:70px; resize:vertical; }
-    .btn { background:var(--accent); color:#fff; border:0; border-radius:8px; padding:8px 12px; font-weight:600; cursor:pointer; }
-    .btn-ghost { background:transparent; color:#fff; border:1px solid #2a3550; border-radius:8px; padding:8px 12px; cursor:pointer; }
-    .btn-danger { background:var(--danger); }
-    .btn-ok { background:var(--ok); }
-    table { width:100%; border-collapse:collapse; font-size:14px; }
-    th, td { border-bottom:1px solid #233; padding:8px; vertical-align:top; }
-    thead th { position:sticky; top:0; background:#0f1530; }
-    .scroll { max-height:360px; overflow:auto; border:1px solid #233; border-radius:8px; }
-    .badge { background:#1f2a44; border-radius:6px; padding:2px 6px; font-size:12px; }
-    .badge-red { background:#3a1020; color:#fecaca; }
-    .toolbar { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:8px 0 12px; }
-    .btn-ghost.active { outline:2px solid #3b82f6; }
-    .toolbar-spacer { color:var(--muted); }
-  </style>
-</head>
-<body>
-  <div class="wrap">
-    <div class="row">
-      <div>
-        <h1 style="margin:8px 0">Painel Operacional</h1>
-        <div class="muted">Avarias • Encomendas • Inventário — 112 teares (sincronizado)</div>
-      </div>
-      <div style="display:flex; gap:8px; align-items:center;">
-        <button class="btn" id="btnExportJSON">Exportar JSON (tudo)</button>
-        <button class="btn" id="btnExportCSV">Exportar CSV (tudo)</button>
-        <label class="btn-ghost" style="cursor:pointer">
-          Importar JSON
-          <input type="file" id="importJson" accept="application/json" style="display:none" />
-        </label>
-      </div>
-    </div>
-
-    <!-- Seleção de Tear -->
-    <div class="card">
-      <div class="grid4">
-        <div>
-          <label style="display:block; margin-bottom:6px">Tear</label>
-          <select id="selTear"></select>
-        </div>
-        <div>
-          <label style="display:block; margin-bottom:6px">Nome</label>
-          <input class="input" id="inpTearNome" readonly />
-        </div>
-      </div>
-    </div>
-
-    <div class="grid2">
-      <!-- Nova Avaria -->
-      <div class="card">
-        <h3>Nova Avaria</h3>
-        <div class="grid4">
-          <div><label>Data</label><input class="input" type="date" id="avData" /></div>
-          <div><label>Hora</label><input class="input" type="time" id="avHora" /></div>
-          <div>
-            <label>Tipo</label>
-            <select class="input" id="avTipo">
-              <option>Mecânica</option><option>Elétrica</option><option>Outros</option>
-            </select>
-          </div>
-          <div><label>Paragem (h)</label><input class="input" type="number" step="0.1" min="0" id="avParagem" /></div>
-
-          <div style="grid-column:1/-1"><label>Descrição</label><textarea class="input" id="avDesc"></textarea></div>
-          <div><label>Técnico</label><input class="input" id="avTec" /></div>
-
-          <!-- Ligação ao inventário -->
-          <div>
-            <label>Peça usada (opcional)</label>
-            <select class="input" id="avPeca">
-              <option value="">— Nenhuma —</option>
-            </select>
-          </div>
-          <div>
-            <label>Qtd peça</label>
-            <input class="input" type="number" min="0" step="1" id="avQtdPeca" value="0" />
-          </div>
-
-          <div style="grid-column:1/-1; display:flex; gap:8px;">
-            <button class="btn" id="btnAddAvaria">Adicionar</button>
-            <button class="btn-ghost" id="btnClearAvaria">Limpar</button>
-          </div>
-        </div>
-      </div>
-
-      <!-- Lista Avarias -->
-      <div class="card">
-        <div style="display:flex; justify-content:space-between; align-items:center;">
-          <h3 style="margin:0">Registos (Avarias)</h3>
-          <div class="muted" id="avResumo"></div>
-        </div>
-
-        <!-- Filtros Avarias -->
-        <div class="toolbar" id="avToolbar">
-          <button class="btn-ghost" data-range="today">Hoje</button>
-          <button class="btn-ghost" data-range="7d">Últimos 7 dias</button>
-          <button class="btn-ghost" data-range="month">Este mês</button>
-          <button class="btn-ghost active" data-range="all">Tudo</button>
-          <span class="toolbar-spacer">|</span>
-          <button class="btn-ghost active" data-scope="tear">Este tear</button>
-          <button class="btn-ghost" data-scope="all">Todos os teares</button>
-          <span class="toolbar-spacer">|</span>
-          <button class="btn-ghost" id="btnCsvAvariasVisivel">Exportar CSV (visível)</button>
-        </div>
-
-        <div class="scroll">
-          <table>
-            <thead><tr>
-              <th>Data</th><th>Hora</th><th>Tipo</th><th>Descrição</th><th>Técnico</th><th>Paragem (h)</th><th></th>
-            </tr></thead>
-            <tbody id="tbAvarias"></tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-
-    <div class="grid2">
-      <!-- Nova Encomenda -->
-      <div class="card">
-        <h3>Nova Encomenda</h3>
-        <div class="grid4">
-          <div><label>Data</label><input class="input" type="date" id="enData" /></div>
-          <div><label>Cliente</label><input class="input" id="enCliente" /></div>
-          <div><label>Produto</label><input class="input" id="enProduto" /></div>
-          <div><label>Qtd (m)</label><input class="input" type="number" min="0" id="enQtd" /></div>
-          <div><label>Largura (cm)</label><input class="input" type="number" min="0" id="enLarg" /></div>
-          <div>
-            <label>Prioridade</label>
-            <select class="input" id="enPrior">
-              <option>Alta</option><option selected>Média</option><option>Baixa</option>
-            </select>
-          </div>
-          <div style="grid-column:1/-1"><label>Observações</label><textarea class="input" id="enObs"></textarea></div>
-          <div style="grid-column:1/-1; display:flex; gap:8px;">
-            <button class="btn" id="btnAddEncomenda">Adicionar</button>
-            <button class="btn-ghost" id="btnClearEncomenda">Limpar</button>
-          </div>
-        </div>
-      </div>
-
-      <!-- Lista Encomendas -->
-      <div class="card">
-        <div style="display:flex; justify-content:space-between; align-items:center;">
-          <h3 style="margin:0">Registos (Encomendas)</h3>
-          <div class="muted" id="enResumo"></div>
-        </div>
-
-        <!-- Filtros Encomendas -->
-        <div class="toolbar" id="enToolbar">
-          <button class="btn-ghost" data-range="today">Hoje</button>
-          <button class="btn-ghost" data-range="7d">Últimos 7 dias</button>
-          <button class="btn-ghost" data-range="month">Este mês</button>
-          <button class="btn-ghost active" data-range="all">Tudo</button>
-          <span class="toolbar-spacer">|</span>
-          <button class="btn-ghost active" data-scope="tear">Este tear</button>
-          <button class="btn-ghost" data-scope="all">Todos os teares</button>
-          <span class="toolbar-spacer">|</span>
-          <button class="btn-ghost" id="btnCsvEncomendasVisivel">Exportar CSV (visível)</button>
-        </div>
-
-        <div class="scroll">
-          <table>
-            <thead><tr>
-              <th>Data</th><th>Cliente</th><th>Produto</th><th>Qtd (m)</th><th>Largura (cm)</th><th>Prioridade</th><th>Observações</th><th></th>
-            </tr></thead>
-            <tbody id="tbEncomendas"></tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-
-    <!-- INVENTÁRIO -->
-    <div class="card">
-      <div style="display:flex; justify-content:space-between; align-items:center;">
-        <h3 style="margin:0">Inventário</h3>
-        <div class="muted" id="invResumo"></div>
-      </div>
-
-      <div class="toolbar" id="invToolbar">
-        <button class="btn-ghost active" data-invfilter="all">Todos</button>
-        <button class="btn-ghost" data-invfilter="low">Só em baixo stock</button>
-        <span class="toolbar-spacer">|</span>
-        <button class="btn" id="btnExportInv">Exportar CSV (inventário)</button>
-      </div>
-
-      <div class="grid3">
-        <div>
-          <label>Pesquisar peça</label>
-          <input class="input" id="invSearch" placeholder="nome, código, local" />
-        </div>
-        <div>
-          <label>Ordenar por</label>
-          <select class="input" id="invSort">
-            <option value="nome">Nome</option>
-            <option value="codigo">Código</option>
-            <option value="stock">Stock</option>
-          </select>
-        </div>
-        <div></div>
-      </div>
-
-      <div class="grid4" style="margin-top:12px;">
-        <div><label>Código</label><input class="input" id="iCodigo"/></div>
-        <div><label>Nome</label><input class="input" id="iNome"/></div>
-        <div><label>Local</label><input class="input" id="iLocal"/></div>
-        <div><label>Stock</label><input class="input" type="number" id="iStock" value="0"/></div>
-        <div><label>Stock mínimo</label><input class="input" type="number" id="iMin" value="0"/></div>
-        <div style="grid-column:1/-1; display:flex; gap:8px;">
-          <button class="btn-ok btn" id="btnInvAdd">Adicionar/Atualizar</button>
-          <button class="btn-ghost" id="btnInvClear">Limpar</button>
-        </div>
-      </div>
-
-      <div class="scroll" style="margin-top:12px;">
-        <table>
-          <thead><tr>
-            <th>Código</th><th>Nome</th><th>Local</th><th>Stock</th><th>Min</th><th></th>
-          </tr></thead>
-          <tbody id="tbInv"></tbody>
-        </table>
-      </div>
-    </div>
-  </div>
-
-  <script>
-    // ===== Firebase config (teu) =====
-    const firebaseConfig = {
-      apiKey: "AIzaSyDLmIafdPeq6Aq5ZVeng6v5jJviDqs4rDk",
-      authDomain: "painel-ada.firebaseapp.com",
-      projectId: "painel-ada",
-      storageBucket: "painel-ada.firebasestorage.app",
-      messagingSenderId: "10091976296",
-      appId: "1:10091976296:web:6d4de4c127e32431274ddd",
-      measurementId: "G-XH2RYBTKX5"
-    };
-    const EMPRESA_ID = "ADA";
-
-    firebase.initializeApp(firebaseConfig);
-    const db = firebase.firestore();
-    const auth = firebase.auth();
-
-    // ===== Helpers
-    const TEARES = Array.from({ length: 112 }, (_, i) => ({ codigo: "TEC-" + String(i + 1).padStart(3, "0"), nome: "Tear " + String(i + 1).padStart(2, "0") }));
-    const LS = { av:"mw_avarias", en:"mw_encomendas", sel:"mw_selected_tear", inv:"mw_inventario" };
-    const todayISO = () => new Date().toISOString().slice(0,10);
-    const nowHM = () => { const d=new Date(); return String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0"); };
-    function startOfMonthISO(d=new Date()){ const x=new Date(d.getFullYear(), d.getMonth(), 1); return x.toISOString().slice(0,10); }
-    function addDaysISO(dateISO, delta){ const d=new Date(dateISO+"T00:00:00"); d.setDate(d.getDate()+delta); return d.toISOString().slice(0,10); }
-    function toCSV(rows){ if(!rows.length) return ""; const headers=Object.keys(rows[0]); const esc=(v)=>{ if(v==null)return ""; const s=String(v); return (s.includes(",")||s.includes("\n")||s.includes('"'))?'"'+s.replace(/"/g,'""')+'"':s; }; return [headers.join(","), ...rows.map(r=>headers.map(h=>esc(r[h])).join(","))].join("\n"); }
-    function download(name, text, type="text/plain"){ const blob=new Blob([text],{type}); const url=URL.createObjectURL(blob); const a=document.createElement("a"); a.href=url; a.download=name; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url); }
-    function safeClosest(target, selector) { return target && target.closest ? target.closest(selector) : null; }
-
-    // ===== Elements
-    const selTear = document.getElementById("selTear");
-    const inpTearNome = document.getElementById("inpTearNome");
-
-    const avData = document.getElementById("avData");
-    const avHora = document.getElementById("avHora");
-    const avTipo = document.getElementById("avTipo");
-    const avParagem = document.getElementById("avParagem");
-    const avDesc = document.getElementById("avDesc");
-    const avTec = document.getElementById("avTec");
-    const avPeca = document.getElementById("avPeca");
-    const avQtdPeca = document.getElementById("avQtdPeca");
-    const tbAvarias = document.getElementById("tbAvarias");
-    const avResumo = document.getElementById("avResumo");
-    const avToolbar = document.getElementById("avToolbar");
-    const btnCsvAvariasVisivel = document.getElementById("btnCsvAvariasVisivel");
-
-    const enData = document.getElementById("enData");
-    const enCliente = document.getElementById("enCliente");
-    const enProduto = document.getElementById("enProduto");
-    const enQtd = document.getElementById("enQtd");
-    const enLarg = document.getElementById("enLarg");
-    const enPrior = document.getElementById("enPrior");
-    const enObs = document.getElementById("enObs");
-    const tbEncomendas = document.getElementById("tbEncomendas");
-    const enResumo = document.getElementById("enResumo");
-    const enToolbar = document.getElementById("enToolbar");
-    const btnCsvEncomendasVisivel = document.getElementById("btnCsvEncomendasVisivel");
-
-    const btnAddAvaria = document.getElementById("btnAddAvaria");
-    const btnClearAvaria = document.getElementById("btnClearAvaria");
-    const btnAddEncomenda = document.getElementById("btnAddEncomenda");
-    const btnClearEncomenda = document.getElementById("btnClearEncomenda");
-
-    const btnExportJSON = document.getElementById("btnExportJSON");
-    const btnExportCSV = document.getElementById("btnExportCSV");
-    const importJson = document.getElementById("importJson");
-
-    // Inventário
-    const invSearch = document.getElementById("invSearch");
-    const invSort = document.getElementById("invSort");
-    const invToolbar = document.getElementById("invToolbar");
-    const btnExportInv = document.getElementById("btnExportInv");
-    const iCodigo = document.getElementById("iCodigo");
-    const iNome = document.getElementById("iNome");
-    const iLocal = document.getElementById("iLocal");
-    const iStock = document.getElementById("iStock");
-    const iMin = document.getElementById("iMin");
-    const btnInvAdd = document.getElementById("btnInvAdd");
-    const btnInvClear = document.getElementById("btnInvClear");
-    const tbInv = document.getElementById("tbInv");
-    const invResumo = document.getElementById("invResumo");
-
-    // ===== Local state + LS cache
-    function loadLS(key, fallback){ try{ return JSON.parse(localStorage.getItem(key) || JSON.stringify(fallback)); } catch{ return fallback; } }
-    function saveLS(key, value){ localStorage.setItem(key, JSON.stringify(value)); }
-
-    let avarias = loadLS(LS.av, []);
-    let encomendas = loadLS(LS.en, []);
-    let inventario = loadLS(LS.inv, []);
-    let selectedTear = localStorage.getItem(LS.sel) || TEARES[0].codigo;
-
-    // ===== UI Teares
-    TEARES.forEach(t => { const opt=document.createElement("option"); opt.value=t.codigo; opt.textContent=`${t.codigo} — ${t.nome}`; selTear.appendChild(opt); });
-    selTear.value = selectedTear;
-    inpTearNome.value = (TEARES.find(t=>t.codigo===selectedTear)||{}).nome || "";
-    selTear.addEventListener("change", () => { selectedTear = selTear.value; localStorage.setItem(LS.sel, selectedTear); inpTearNome.value = (TEARES.find(t=>t.codigo===selectedTear)||{}).nome || ""; renderTables(); });
-
-    function setFormDefaults(){
-      avData.value=todayISO(); avHora.value=nowHM(); avParagem.value="0"; avDesc.value=""; avTec.value=""; avPeca.value=""; avQtdPeca.value="0";
-      enData.value=todayISO(); enCliente.value=""; enProduto.value=""; enQtd.value="0"; enLarg.value="242"; enPrior.value="Média"; enObs.value="";
-      iCodigo.value=""; iNome.value=""; iLocal.value=""; iStock.value="0"; iMin.value="0";
+    // Helpers
+    function isAuthed() { return request.auth != null; }
+    function isADA(empresaId) { return empresaId == "ADA"; }
+    function nonNegative(n) { return n is number && n >= 0; }
+    function sameCompanyOnCreate(empresaId) {
+      return request.resource.data.empresaId == empresaId && isADA(empresaId);
     }
-    setFormDefaults();
-
-    // ===== Filtros
-    let avRange="all", avScope="tear";
-    let enRange="all", enScope="tear";
-    function wireToolbar(toolbar, setRange, setScope){
-      if(!toolbar) return;
-      toolbar.addEventListener("click",(e)=>{
-        const btn = safeClosest(e.target,"button");
-        if(!btn) return;
-        if(btn.hasAttribute("data-range")){ const v=btn.getAttribute("data-range"); setRange(v); toolbar.querySelectorAll("[data-range]").forEach(x=>x.classList.toggle("active",x===btn)); renderTables(); }
-        if(btn.hasAttribute("data-scope")){ const v=btn.getAttribute("data-scope"); setScope(v); toolbar.querySelectorAll("[data-scope]").forEach(x=>x.classList.toggle("active",x===btn)); renderTables(); }
-      });
+    function sameCompanyOnUpdate(empresaId) {
+      return resource.data.empresaId == empresaId &&
+             request.resource.data.empresaId == resource.data.empresaId &&
+             isADA(empresaId);
     }
-    wireToolbar(avToolbar,(v)=>avRange=v,(v)=>avScope=v);
-    wireToolbar(enToolbar,(v)=>enRange=v,(v)=>enScope=v);
 
-    // ===== Firestore refs
-    const colAvarias   = () => db.collection("companies").doc(EMPRESA_ID).collection("avarias");
-    const colEncomendas= () => db.collection("companies").doc(EMPRESA_ID).collection("encomendas");
-    const colInvent    = () => db.collection("companies").doc(EMPRESA_ID).collection("inventario");
+    // /companies/{empresaId}/(avarias|encomendas|inventario)
+    match /companies/{empresaId} {
 
-    // ===== Auth + realtime listeners (com erro visível)
-    auth.signInAnonymously().catch((e)=>{ console.error("Auth",e); alert("Erro de autenticação Firebase:\n"+(e?.message||e)); });
-    auth.onAuthStateChanged(() => {
-     // PATCH SEM ÍNDICE (funciona já)
-colAvarias().orderBy("createdAt", "desc").onSnapshot(
-
-        (snap)=>{
-          avarias = snap.docs.map(d => ({ id:d.id, ...d.data() })); saveLS(LS.av,avarias); renderTables();
-        },
-        (err)=>{
-          console.error("Snapshot avarias:", err);
-          alert("Erro a ler Avarias do Firestore:\n" + (err?.message || err));
-        }
-      );
-      colEncomendas().orderBy("data","desc").onSnapshot(
-        (snap)=>{
-          encomendas = snap.docs.map(d => ({ id:d.id, ...d.data() })); saveLS(LS.en,encomendas); renderTables();
-        },
-        (err)=>{
-          console.error("Snapshot encomendas:", err);
-          alert("Erro a ler Encomendas do Firestore:\n" + (err?.message || err));
-        }
-      );
-      colInvent().orderBy("nome","asc").onSnapshot(
-        (snap)=>{
-          inventario = snap.docs.map(d => ({ id:d.id, ...d.data() })); saveLS(LS.inv,inventario);
-          // popular dropdown de peças
-          const sel = avPeca; const cur = sel.value;
-          sel.innerHTML = `<option value="">— Nenhuma —</option>` + inventario.map(i => `<option value="${i.id}">${i.codigo||""} — ${i.nome||""} (stk:${i.stock??0})</option>`).join("");
-          if (inventario.some(i=>i.id===cur)) sel.value = cur;
-          renderInventario();
-        },
-        (err)=>{
-          console.error("Snapshot inventário:", err);
-          alert("Erro a ler Inventário do Firestore:\n" + (err?.message || err));
-        }
-      );
-    });
-
-    // ===== Inventário: add/update e clear
-    btnInvAdd.addEventListener("click", async ()=>{
-      try{
-        const payload = {
-          codigo: iCodigo.value.trim(),
-          nome: iNome.value.trim(),
-          local: iLocal.value.trim(),
-          stock: Number(iStock.value)||0,
-          min: Number(iMin.value)||0,
-          empresaId: EMPRESA_ID,
-          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-        };
-        if (!payload.nome) { alert("Indica o nome da peça."); return; }
-        if (payload.codigo) {
-          const q = await colInvent().where("codigo","==",payload.codigo).limit(1).get();
-          if (!q.empty) await colInvent().doc(q.docs[0].id).set(payload, { merge:true });
-          else await colInvent().add(payload);
-        } else {
-          await colInvent().add(payload);
-        }
-        setFormDefaults();
-      }catch(e){ console.error(e); alert("Erro ao gravar inventário:\n"+(e?.message||e)); }
-    });
-    btnInvClear.addEventListener("click", setFormDefaults);
-
-    // ===== Avarias: adicionar (com baixa de stock se peça selecionada) — COM try/catch
-    btnAddAvaria.addEventListener("click", async ()=>{
-      try{
-        if (!avData.value || !avHora.value || !avDesc.value) return alert("Preenche Data, Hora e Descrição.");
-        const doc = {
-          data: avData.value, hora: avHora.value, tear: selectedTear,
-          equipamento: (TEARES.find(t=>t.codigo===selectedTear)||{}).nome || "",
-          localizacao: "Tecelagem", tipo: avTipo.value || "Outros",
-          descricao: avDesc.value, tecnico: avTec.value || "",
-          tempoParagem: Number(avParagem.value)||0,
-          empresaId: EMPRESA_ID, createdAt: firebase.firestore.FieldValue.serverTimestamp(),
-          pecaId: avPeca.value || "", pecaQtd: Number(avQtdPeca.value)||0
-        };
-
-        if (doc.pecaId && doc.pecaQtd>0) {
-          await db.runTransaction(async (tx)=>{
-            const refInv = colInvent().doc(doc.pecaId);
-            const snapInv = await tx.get(refInv);
-            if (!snapInv.exists) throw new Error("Peça não encontrada no inventário.");
-            const cur = snapInv.data();
-            const novo = (Number(cur.stock)||0) - doc.pecaQtd;
-            if (novo < 0) throw new Error(`Stock insuficiente (${cur.stock}) para baixar ${doc.pecaQtd}.`);
-            tx.update(refInv, { stock: novo, updatedAt: firebase.firestore.FieldValue.serverTimestamp() });
-          });
-        }
-        await colAvarias().add(doc);
-        setFormDefaults();
-      }catch(err){
-        console.error("Erro a criar avaria:", err);
-        alert("Não foi possível registar a avaria:\n" + (err?.message || err));
+      match /avarias/{id} {
+        allow create: if isAuthed() &&
+                       sameCompanyOnCreate(empresaId) &&
+                       request.resource.data.data is string &&
+                       request.resource.data.hora is string &&
+                       request.resource.data.tear is string &&
+                       request.resource.data.tipo is string &&
+                       request.resource.data.descricao is string &&
+                       (request.resource.data.tecnico == null || request.resource.data.tecnico is string) &&
+                       (request.resource.data.tempoParagem == null || nonNegative(request.resource.data.tempoParagem)) &&
+                       (request.resource.data.pecaId == null || request.resource.data.pecaId is string) &&
+                       (request.resource.data.pecaQtd == null || nonNegative(request.resource.data.pecaQtd));
+        allow update: if isAuthed() &&
+                       sameCompanyOnUpdate(empresaId) &&
+                       (request.resource.data.tempoParagem == null || nonNegative(request.resource.data.tempoParagem)) &&
+                       (request.resource.data.pecaQtd == null || nonNegative(request.resource.data.pecaQtd));
+        allow read:   if isAuthed() && isADA(empresaId);
+        allow delete: if isAuthed() &&
+                       resource.data.empresaId == empresaId &&
+                       isADA(empresaId);
       }
-    });
-    btnClearAvaria.addEventListener("click", setFormDefaults);
 
-    // ===== Encomendas: adicionar
-    btnAddEncomenda.addEventListener("click", async ()=>{
-      try{
-        if (!enData.value || !enCliente.value || !enProduto.value) return alert("Preenche Data, Cliente e Produto.");
-        const doc = {
-          data: enData.value, cliente: enCliente.value, produto: enProduto.value,
-          quantidadeM: Number(enQtd.value)||0, larguraCm: Number(enLarg.value)||0,
-          prioridade: enPrior.value || "Média", tear: selectedTear, observacoes: enObs.value || "",
-          empresaId: EMPRESA_ID, createdAt: firebase.firestore.FieldValue.serverTimestamp()
-        };
-        await colEncomendas().add(doc);
-        setFormDefaults();
-      }catch(e){ console.error(e); alert("Não foi possível registar a encomenda:\n"+(e?.message||e)); }
-    });
-    btnClearEncomenda.addEventListener("click", setFormDefaults);
-
-    // ===== Tabelas: duplicar/apagar (delegação segura)
-    tbAvarias.addEventListener("click", async (e)=>{
-      const btn = safeClosest(e.target,"button"); if(!btn) return;
-      const id=btn.dataset.id, act=btn.dataset.act;
-      try{
-        if(act==="del-av"){ await colAvarias().doc(id).delete(); }
-        else if(act==="dup-av"){ const a=avarias.find(x=>x.id===id); if(!a)return; const copy={...a}; delete copy.id; copy.data=todayISO(); copy.hora=nowHM(); copy.createdAt=firebase.firestore.FieldValue.serverTimestamp(); await colAvarias().add(copy); }
-      }catch(err){ alert("Erro:\n"+(err?.message||err)); }
-    });
-    tbEncomendas.addEventListener("click", async (e)=>{
-      const btn = safeClosest(e.target,"button"); if(!btn) return;
-      const id=btn.dataset.id, act=btn.dataset.act;
-      try{
-        if(act==="del-en"){ await colEncomendas().doc(id).delete(); }
-        else if(act==="dup-en"){ const x=encomendas.find(y=>y.id===id); if(!x)return; const copy={...x}; delete copy.id; copy.data=todayISO(); copy.createdAt=firebase.firestore.FieldValue.serverTimestamp(); await colEncomendas().add(copy); }
-      }catch(err){ alert("Erro:\n"+(err?.message||err)); }
-    });
-
-    // ===== Export/Import (tudo)
-    btnExportJSON.addEventListener("click", () => download("manutencao_"+todayISO()+".json", JSON.stringify({ avarias, encomendas, inventario }, null, 2), "application/json"));
-    btnExportCSV.addEventListener("click", () => {
-      const csvA=toCSV(avarias)||"id,data,hora,tear,equipamento,localizacao,tipo,descricao,tecnico,tempoParagem\n";
-      const csvE=toCSV(encomendas)||"id,data,cliente,produto,quantidadeM,larguraCm,prioridade,tear,observacoes\n";
-      const csvI=toCSV(inventario)||"id,codigo,nome,local,stock,min\n";
-      download("avarias.csv", csvA, "text/csv");
-      download("encomendas.csv", csvE, "text/csv");
-      download("inventario.csv", csvI, "text/csv");
-    });
-    importJson.addEventListener("change", (e) => {
-      const file=e.target.files?.[0]; if(!file) return;
-      const reader=new FileReader();
-      reader.onload=async ()=>{ try{
-        const obj=JSON.parse(String(reader.result));
-        if(Array.isArray(obj.avarias)) for(const a of obj.avarias) await colAvarias().add({ ...a, empresaId:EMPRESA_ID });
-        if(Array.isArray(obj.encomendas)) for(const x of obj.encomendas) await colEncomendas().add({ ...x, empresaId:EMPRESA_ID });
-        if(Array.isArray(obj.inventario)) for(const i of obj.inventario) await colInvent().add({ ...i, empresaId:EMPRESA_ID });
-      } catch(err){ alert("Ficheiro inválido ou erro a importar:\n"+(err?.message||err)); } };
-      reader.readAsText(file);
-    });
-
-    // ===== Export CSV (visível) — filtros atuais
-    function filterByRange(list, range){
-      const today=todayISO(); let from=null,to=null;
-      if(range==="today"){ from=today; to=today; }
-      else if(range==="7d"){ from=addDaysISO(today,-6); to=today; }
-      else if(range==="month"){ from=startOfMonthISO(new Date()); to=today; }
-      return (!from||!to) ? list : list.filter(r => (r.data||"")>=from && (r.data||"")<=to);
-    }
-    btnCsvAvariasVisivel.addEventListener("click",()=>{
-      const base = (avScope==="tear") ? avarias.filter(a=>a.tear===selectedTear) : avarias.slice();
-      const filtered = filterByRange(base, avRange);
-      const csv = toCSV(filtered) || "id,data,hora,tear,equipamento,localizacao,tipo,descricao,tecnico,tempoParagem\n";
-      download("avarias_visivel.csv", csv, "text/csv");
-    });
-    btnCsvEncomendasVisivel.addEventListener("click",()=>{
-      const base = (enScope==="tear") ? encomendas.filter(e=>e.tear===selectedTear) : encomendas.slice();
-      const filtered = filterByRange(base, enRange);
-      const csv = toCSV(filtered) || "id,data,cliente,produto,quantidadeM,larguraCm,prioridade,tear,observacoes\n";
-      download("encomendas_visivel.csv", csv, "text/csv");
-    });
-
-    // ===== Render tabelas
-    function renderTables() {
-      // AVARIAS
-      const AV_LIMIT=100;
-      const baseA = (avScope==="tear") ? avarias.filter(a=>a.tear===selectedTear) : avarias.slice();
-      const listA = filterByRange(baseA, avRange);
-      tbAvarias.innerHTML=""; let totalA=0;
-      listA.slice(0,AV_LIMIT).forEach(a=>{
-        totalA += Number(a.tempoParagem)||0;
-        const tr=document.createElement("tr");
-        tr.innerHTML = `
-          <td>${a.data||""}</td>
-          <td>${a.hora||""}</td>
-          <td>${a.tipo||""}</td>
-          <td title="${(a.descricao||"").replace(/"/g,'&quot;')}" style="max-width:420px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis">${a.descricao||""}</td>
-          <td>${a.tecnico||""}</td>
-          <td>${(Number(a.tempoParagem)||0).toFixed(2)}</td>
-          <td style="text-align:right">
-            <button class="btn-ghost" data-act="dup-av" data-id="${a.id}">Duplicar</button>
-            <button class="btn-ghost" data-act="del-av" data-id="${a.id}">Apagar</button>
-          </td>
-        `;
-        tbAvarias.appendChild(tr);
-      });
-      if (!listA.length){ const tr=document.createElement("tr"); tr.innerHTML=`<td class="muted" colspan="7">Sem registos para este filtro.</td>`; tbAvarias.appendChild(tr); }
-      const msgA = listA.length>AV_LIMIT ? ` • a mostrar ${Math.min(AV_LIMIT,listA.length)} de ${listA.length}` : "";
-      const scopeA = (avScope==="tear")?`tear ${selectedTear}`:`todos os teares`;
-      const rangeA = avRange==="today"?"hoje":avRange==="7d"?"últimos 7 dias":avRange==="month"?"este mês":"todas as datas";
-      avResumo.textContent = `${listA.length} registos (${scopeA}, ${rangeA}) • Total visível: ${totalA.toFixed(2)} h${msgA}`;
-
-      // ENCOMENDAS
-      const EN_LIMIT=100;
-      const baseE = (enScope==="tear") ? encomendas.filter(e=>e.tear===selectedTear) : encomendas.slice();
-      const listE = filterByRange(baseE, enRange);
-      tbEncomendas.innerHTML="";
-      listE.slice(0,EN_LIMIT).forEach(e=>{
-        const tr=document.createElement("tr");
-        tr.innerHTML = `
-          <td>${e.data||""}</td>
-          <td>${e.cliente||""}</td>
-          <td>${e.produto||""}</td>
-          <td>${e.quantidadeM??0}</td>
-          <td>${e.larguraCm??0}</td>
-          <td><span class="badge">${e.prioridade||""}</span></td>
-          <td title="${(e.observacoes||"").replace(/"/g,'&quot;')}" style="max-width:420px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis">${e.observacoes||""}</td>
-          <td style="text-align:right">
-            <button class="btn-ghost" data-act="dup-en" data-id="${e.id}">Duplicar</button>
-            <button class="btn-ghost" data-act="del-en" data-id="${e.id}">Apagar</button>
-          </td>
-        `;
-        tbEncomendas.appendChild(tr);
-      });
-      if (!listE.length){ const tr=document.createElement("tr"); tr.innerHTML=`<td class="muted" colspan="8">Sem encomendas para este filtro.</td>`; tbEncomendas.appendChild(tr); }
-      enResumo.textContent = `${listE.length} registos`;
-
-      // INVENTÁRIO
-      renderInventario();
-    }
-
-    function renderInventario() {
-      const q = (invSearch.value||"").toLowerCase();
-      const sortKey = invSort.value || "nome";
-      const btnActive = invToolbar.querySelector(".btn-ghost.active[data-invfilter]");
-      const filter = btnActive ? btnActive.getAttribute("data-invfilter") : "all";
-      let list = inventario.slice();
-      if (q) list = list.filter(i => ((i.nome||"") + " " + (i.codigo||"") + " " + (i.local||"")).toLowerCase().includes(q));
-      if (filter==="low") list = list.filter(i => (Number(i.stock)||0) <= (Number(i.min)||0));
-      list.sort((a,b)=>{
-        if (sortKey==="stock") return (Number(a.stock)||0) - (Number(b.stock)||0);
-        return String(a[sortKey]||"").localeCompare(String(b[sortKey]||""));
-      });
-
-      tbInv.innerHTML = "";
-      list.forEach(i=>{
-        const low = (Number(i.stock)||0) <= (Number(i.min)||0);
-        const tr=document.createElement("tr");
-        tr.innerHTML = `
-          <td>${i.codigo||""}</td>
-          <td>${i.nome||""}</td>
-          <td>${i.local||""}</td>
-          <td>${i.stock??0} ${low?'<span class="badge badge-red" style="margin-left:6px;">baixo</span>':''}</td>
-          <td>${i.min??0}</td>
-          <td style="text-align:right">
-            <button class="btn-ghost" data-act="fill" data-id="${i.id}">Preencher</button>
-            <button class="btn-ghost btn-danger" data-act="del" data-id="${i.id}">Apagar</button>
-          </td>
-        `;
-        tbInv.appendChild(tr);
-      });
-      if (!list.length){ const tr=document.createElement("tr"); tr.innerHTML=`<td class="muted" colspan="6">Sem itens.</td>`; tbInv.appendChild(tr); }
-      invResumo.textContent = `${inventario.length} itens no inventário`;
-    }
-
-    invToolbar.addEventListener("click",(e)=>{
-      const btn = safeClosest(e.target,"button"); if(!btn) return;
-      if (btn.hasAttribute("data-invfilter")){
-        invToolbar.querySelectorAll("[data-invfilter]").forEach(x=>x.classList.toggle("active", x===btn));
-        renderInventario();
+      match /encomendas/{id} {
+        allow create: if isAuthed() &&
+                       sameCompanyOnCreate(empresaId) &&
+                       request.resource.data.data is string &&
+                       request.resource.data.cliente is string &&
+                       request.resource.data.produto is string &&
+                       (request.resource.data.quantidadeM == null || nonNegative(request.resource.data.quantidadeM)) &&
+                       (request.resource.data.larguraCm == null || nonNegative(request.resource.data.larguraCm)) &&
+                       (request.resource.data.prioridade == null || request.resource.data.prioridade is string) &&
+                       request.resource.data.tear is string &&
+                       (request.resource.data.observacoes == null || request.resource.data.observacoes is string);
+        allow update: if isAuthed() &&
+                       sameCompanyOnUpdate(empresaId) &&
+                       (request.resource.data.quantidadeM == null || nonNegative(request.resource.data.quantidadeM)) &&
+                       (request.resource.data.larguraCm == null || nonNegative(request.resource.data.larguraCm));
+        allow read:   if isAuthed() && isADA(empresaId);
+        allow delete: if isAuthed() &&
+                       resource.data.empresaId == empresaId &&
+                       isADA(empresaId);
       }
-    });
-    invSearch.addEventListener("input", renderInventario);
-    invSort.addEventListener("change", renderInventario);
-    btnExportInv.addEventListener("click", ()=> {
-      const csv = toCSV(inventario)||"id,codigo,nome,local,stock,min\n";
-      download("inventario.csv", csv, "text/csv");
-    });
-    tbInv.addEventListener("click", async (e)=>{
-      const btn = safeClosest(e.target,"button"); if(!btn) return;
-      const id=btn.dataset.id, act=btn.dataset.act;
-      try{
-        if (act==="del") {
-          if (confirm("Apagar item do inventário?")) await colInvent().doc(id).delete();
-        } else if (act==="fill") {
-          const it = inventario.find(x=>x.id===id); if (!it) return;
-          iCodigo.value=it.codigo||""; iNome.value=it.nome||""; iLocal.value=it.local||"";
-          iStock.value=it.stock??0; iMin.value=it.min??0;
-        }
-      }catch(err){ alert("Erro:\n"+(err?.message||err)); }
-    });
 
-    // Primeiro render (usa cache até chegar Firestore)
-    renderTables();
-
-    // Service worker v5 (forçar atualização)
-    if ("serviceWorker" in navigator) {
-      window.addEventListener("load", () => {
-        navigator.serviceWorker.register("/sw.js?v=5").catch(()=>{});
-      });
+      match /inventario/{id} {
+        allow create: if isAuthed() &&
+                       sameCompanyOnCreate(empresaId) &&
+                       (request.resource.data.codigo == null || request.resource.data.codigo is string) &&
+                       request.resource.data.nome is string &&
+                       (request.resource.data.local == null || request.resource.data.local is string) &&
+                       (request.resource.data.stock == null || nonNegative(request.resource.data.stock)) &&
+                       (request.resource.data.min == null   || nonNegative(request.resource.data.min));
+        allow update: if isAuthed() &&
+                       sameCompanyOnUpdate(empresaId) &&
+                       (request.resource.data.stock == null || nonNegative(request.resource.data.stock)) &&
+                       (request.resource.data.min == null   || nonNegative(request.resource.data.min));
+        allow read:   if isAuthed() && isADA(empresaId);
+        allow delete: if isAuthed() &&
+                       resource.data.empresaId == empresaId &&
+                       isADA(empresaId);
+      }
     }
-  </script>
-</body>
-</html>
+  }
+}
