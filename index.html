@@ -13,10 +13,15 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <link rel="apple-touch-icon" sizes="180x180" href="/icons/icon-180.png?v=2" />
 
+  <!-- Firebase (compat para facilitar integração num HTML simples) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+
   <style>
     :root { --bg:#0b1020; --card:#11162a; --muted:#a2a9c3; --accent:#3b82f6; }
     * { box-sizing: border-box; }
-    body { margin:0; background:var(--bg); color:#fff; font:15px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; }
+    body { margin:0; background:var(--bg); color:#fff; font:15px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif; }
     .wrap { max-width:1200px; margin:0 auto; padding:16px; }
     .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; justify-content:space-between; }
     .card { background:var(--card); border-radius:12px; padding:16px; margin-top:16px; }
@@ -37,18 +42,13 @@
     .btn-ghost.active { outline:2px solid #3b82f6; }
     .toolbar-spacer { color:var(--muted); }
   </style>
-
-  <!-- Firebase (compat para usar direto no HTML) -->
-  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 </head>
 <body>
   <div class="wrap">
     <div class="row">
       <div>
         <h1 style="margin:8px 0">Painel Operacional</h1>
-        <div class="muted">Avarias e Encomendas — 112 teares</div>
+        <div class="muted">Avarias e Encomendas — 112 teares (sincronizado)</div>
       </div>
       <div style="display:flex; gap:8px; align-items:center;">
         <button class="btn" id="btnExportJSON">Exportar JSON (tudo)</button>
@@ -103,6 +103,8 @@
           <h3 style="margin:0">Registos (Avarias)</h3>
           <div class="muted" id="avResumo"></div>
         </div>
+
+        <!-- Filtros Avarias -->
         <div class="toolbar" id="avToolbar">
           <button class="btn-ghost" data-range="today">Hoje</button>
           <button class="btn-ghost" data-range="7d">Últimos 7 dias</button>
@@ -114,6 +116,7 @@
           <span class="toolbar-spacer">|</span>
           <button class="btn-ghost" id="btnCsvAvariasVisivel">Exportar CSV (visível)</button>
         </div>
+
         <div class="scroll">
           <table>
             <thead><tr>
@@ -155,6 +158,8 @@
           <h3 style="margin:0">Registos (Encomendas)</h3>
           <div class="muted" id="enResumo"></div>
         </div>
+
+        <!-- Filtros Encomendas -->
         <div class="toolbar" id="enToolbar">
           <button class="btn-ghost" data-range="today">Hoje</button>
           <button class="btn-ghost" data-range="7d">Últimos 7 dias</button>
@@ -166,6 +171,7 @@
           <span class="toolbar-spacer">|</span>
           <button class="btn-ghost" id="btnCsvEncomendasVisivel">Exportar CSV (visível)</button>
         </div>
+
         <div class="scroll">
           <table>
             <thead><tr>
@@ -176,53 +182,35 @@
         </div>
       </div>
     </div>
+
   </div>
 
   <script>
-    // ===== Helpers/UI =====
-    const TEARES = Array.from({ length: 112 }, (_, i) => ({
-      codigo: "TEC-" + String(i + 1).padStart(3, "0"),
-      nome: "Tear " + String(i + 1).padStart(2, "0"),
-    }));
+    // ===== Firebase config =====
+    const firebaseConfig = {
+      // <-- COLA AQUI O TEU firebaseConfig (apiKey, authDomain, projectId, storageBucket, messagingSenderId, appId)
+    };
+    const EMPRESA_ID = "ADA"; // usa o mesmo para todos (sem espaços)
+
+    // Inicializar Firebase
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+    const auth = firebase.auth();
+
+    // Helpers / Estado base
+    const TEARES = Array.from({ length: 112 }, (_, i) => ({ codigo: "TEC-" + String(i + 1).padStart(3, "0"), nome: "Tear " + String(i + 1).padStart(2, "0") }));
     const LS = { av:"mw_avarias", en:"mw_encomendas", sel:"mw_selected_tear" };
     const uid = () => Math.random().toString(36).slice(2) + Date.now().toString(36);
     const todayISO = () => new Date().toISOString().slice(0,10);
     const nowHM = () => { const d=new Date(); return String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0"); };
     function startOfMonthISO(d=new Date()){ const x=new Date(d.getFullYear(), d.getMonth(), 1); return x.toISOString().slice(0,10); }
     function addDaysISO(dateISO, delta){ const d=new Date(dateISO+"T00:00:00"); d.setDate(d.getDate()+delta); return d.toISOString().slice(0,10); }
-    function toCSV(rows){
-      if(!rows.length) return "";
-      const headers = Object.keys(rows[0]);
-      const esc = (v)=>{ if(v==null) return ""; const s=String(v); return (s.includes(",")||s.includes("\n")||s.includes('"'))?'"'+s.replace(/"/g,'""')+'"':s; };
-      return [headers.join(","), ...rows.map(r=>headers.map(h=>esc(r[h])).join(","))].join("\n");
-    }
-    function download(name, text, type="text/plain"){
-      const blob=new Blob([text],{type}); const url=URL.createObjectURL(blob);
-      const a=document.createElement("a"); a.href=url; a.download=name; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
-    }
-    function saveLS(key, value){ localStorage.setItem(key, JSON.stringify(value)); }
-    function loadLS(key, fallback){ try{ return JSON.parse(localStorage.getItem(key) || JSON.stringify(fallback)); } catch{ return fallback; } }
+    function toCSV(rows){ if(!rows.length) return ""; const headers = Object.keys(rows[0]); const esc=(v)=>{ if(v==null)return ""; const s=String(v); return (s.includes(",")||s.includes("\n")||s.includes('"'))?'"'+s.replace(/"/g,'""')+'"':s; }; return [headers.join(","), ...rows.map(r=>headers.map(h=>esc(r[h])).join(","))].join("\n"); }
+    function download(name, text, type="text/plain"){ const blob=new Blob([text],{type}); const url=URL.createObjectURL(blob); const a=document.createElement("a"); a.href=url; a.download=name; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url); }
 
-    // ===== Firebase =====
-    const firebaseConfig = {
-      apiKey: "AIzaSyDLmIafdPeq6Aq5ZVeng6v5jJviDqs4rDk",
-      authDomain: "painel-ada.firebaseapp.com",
-      projectId: "painel-ada",
-      storageBucket: "painel-ada.firebasestorage.app",
-      messagingSenderId: "10091976296",
-      appId: "1:10091976296:web:6d4de4c127e32431274ddd",
-      measurementId: "G-XH2RYBTKX5"
-    };
-    const EMPRESA_ID = "ADA"; // <- troca aqui se quiseres outro identificador
-
-    firebase.initializeApp(firebaseConfig);
-    const db = firebase.firestore();
-    const auth = firebase.auth();
-
-    // ===== Estado / elementos
+    // Elementos
     const selTear = document.getElementById("selTear");
     const inpTearNome = document.getElementById("inpTearNome");
-
     const avData = document.getElementById("avData");
     const avHora = document.getElementById("avHora");
     const avTipo = document.getElementById("avTipo");
@@ -233,7 +221,6 @@
     const avResumo = document.getElementById("avResumo");
     const avToolbar = document.getElementById("avToolbar");
     const btnCsvAvariasVisivel = document.getElementById("btnCsvAvariasVisivel");
-
     const enData = document.getElementById("enData");
     const enCliente = document.getElementById("enCliente");
     const enProduto = document.getElementById("enProduto");
@@ -245,315 +232,132 @@
     const enResumo = document.getElementById("enResumo");
     const enToolbar = document.getElementById("enToolbar");
     const btnCsvEncomendasVisivel = document.getElementById("btnCsvEncomendasVisivel");
-
     const btnAddAvaria = document.getElementById("btnAddAvaria");
     const btnClearAvaria = document.getElementById("btnClearAvaria");
     const btnAddEncomenda = document.getElementById("btnAddEncomenda");
     const btnClearEncomenda = document.getElementById("btnClearEncomenda");
-
     const btnExportJSON = document.getElementById("btnExportJSON");
     const btnExportCSV = document.getElementById("btnExportCSV");
     const importJson = document.getElementById("importJson");
 
-    // povoar dropdown de teares
-    TEARES.forEach(t => {
-      const opt = document.createElement("option");
-      opt.value = t.codigo; opt.textContent = `${t.codigo} — ${t.nome}`;
-      selTear.appendChild(opt);
-    });
+    // LS helpers
+    function loadLS(key, fallback){ try{ return JSON.parse(localStorage.getItem(key) || JSON.stringify(fallback)); } catch{ return fallback; } }
+    function saveLS(key, value){ localStorage.setItem(key, JSON.stringify(value)); }
+
+    let avarias = loadLS(LS.av, []);     // cache local (para offline/primeira abertura)
+    let encomendas = loadLS(LS.en, []);
     let selectedTear = localStorage.getItem(LS.sel) || TEARES[0].codigo;
+
+    // UI Teares
+    TEARES.forEach(t => { const opt=document.createElement("option"); opt.value=t.codigo; opt.textContent=`${t.codigo} — ${t.nome}`; selTear.appendChild(opt); });
     selTear.value = selectedTear;
     inpTearNome.value = (TEARES.find(t=>t.codigo===selectedTear)||{}).nome || "";
-    selTear.addEventListener("change", () => {
-      selectedTear = selTear.value;
-      localStorage.setItem(LS.sel, selectedTear);
-      inpTearNome.value = (TEARES.find(t=>t.codigo===selectedTear)||{}).nome || "";
-      renderTables();
-    });
+    selTear.addEventListener("change", () => { selectedTear = selTear.value; localStorage.setItem(LS.sel, selectedTear); inpTearNome.value = (TEARES.find(t=>t.codigo===selectedTear)||{}).nome || ""; renderTables(); });
 
-    function setFormDefaults() {
-      avData.value = todayISO(); avHora.value = nowHM(); avParagem.value = "0"; avDesc.value = ""; avTec.value = "";
-      enData.value = todayISO(); enCliente.value=""; enProduto.value=""; enQtd.value="0"; enLarg.value="242"; enPrior.value="Média"; enObs.value="";
-    }
+    function setFormDefaults(){ avData.value=todayISO(); avHora.value=nowHM(); avParagem.value="0"; avDesc.value=""; avTec.value=""; enData.value=todayISO(); enCliente.value=""; enProduto.value=""; enQtd.value="0"; enLarg.value="242"; enPrior.value="Média"; enObs.value=""; }
     setFormDefaults();
 
-    // ===== Firestore helpers
+    // Filtros
+    let avRange="all", avScope="tear";
+    let enRange="all", enScope="tear";
+    function wireToolbar(toolbar, setRange, setScope){
+      toolbar.addEventListener("click",(e)=>{
+        const b=e.target.closest("button"); if(!b) return;
+        if(b.hasAttribute("data-range")){ const v=b.getAttribute("data-range"); setRange(v); toolbar.querySelectorAll("[data-range]").forEach(x=>x.classList.toggle("active",x===b)); renderTables(); }
+        if(b.hasAttribute("data-scope")){ const v=b.getAttribute("data-scope"); setScope(v); toolbar.querySelectorAll("[data-scope]").forEach(x=>x.classList.toggle("active",x===b)); renderTables(); }
+      });
+    }
+    wireToolbar(avToolbar,(v)=>avRange=v,(v)=>avScope=v);
+    wireToolbar(enToolbar,(v)=>enRange=v,(v)=>enScope=v);
+
+    // Firestore refs
     const colAvarias = () => db.collection("companies").doc(EMPRESA_ID).collection("avarias");
     const colEncomendas = () => db.collection("companies").doc(EMPRESA_ID).collection("encomendas");
 
-    // login anónimo e listeners em tempo real
-    let avarias = loadLS(LS.av, []);       // cache inicial
-    let encomendas = loadLS(LS.en, []);    // cache inicial
+    // Login anónimo e listeners em tempo real
     auth.signInAnonymously().catch(console.error);
     auth.onAuthStateChanged(() => {
-      // ordenar por createdAt (evita criar índices compostos)
-      colAvarias().orderBy("createdAt","desc").onSnapshot((snap)=>{
-        avarias = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      // AVARIAS realtime
+      colAvarias().orderBy("data","desc").orderBy("hora","desc").onSnapshot((snap)=>{
+        avarias = snap.docs.map(d => ({ id:d.id, ...d.data() }));
         saveLS(LS.av, avarias);
         renderTables();
       });
-      colEncomendas().orderBy("createdAt","desc").onSnapshot((snap)=>{
-        encomendas = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      // ENCOMENDAS realtime
+      colEncomendas().orderBy("data","desc").onSnapshot((snap)=>{
+        encomendas = snap.docs.map(d => ({ id:d.id, ...d.data() }));
         saveLS(LS.en, encomendas);
         renderTables();
       });
     });
 
-    // ===== Filtros Avarias
-    let avRange = "all", avScope = "tear";
-    if (avToolbar){
-      avToolbar.addEventListener("click", (e)=>{
-        const b=e.target.closest("button"); if(!b) return;
-        if (b.hasAttribute("data-range")) {
-          avRange = b.getAttribute("data-range");
-          avToolbar.querySelectorAll("[data-range]").forEach(x=>x.classList.toggle("active", x===b));
-          renderTables();
-        }
-        if (b.hasAttribute("data-scope")) {
-          avScope = b.getAttribute("data-scope");
-          avToolbar.querySelectorAll("[data-scope]").forEach(x=>x.classList.toggle("active", x===b));
-          renderTables();
-        }
-      });
-    }
-
-    // ===== Filtros Encomendas
-    let enRange = "all", enScope = "tear";
-    if (enToolbar){
-      enToolbar.addEventListener("click", (e)=>{
-        const b=e.target.closest("button"); if(!b) return;
-        if (b.hasAttribute("data-range")) {
-          enRange = b.getAttribute("data-range");
-          enToolbar.querySelectorAll("[data-range]").forEach(x=>x.classList.toggle("active", x===b));
-          renderTables();
-        }
-        if (b.hasAttribute("data-scope")) {
-          enScope = b.getAttribute("data-scope");
-          enToolbar.querySelectorAll("[data-scope]").forEach(x=>x.classList.toggle("active", x===b));
-          renderTables();
-        }
-      });
-    }
-
-    // ===== Ações AVARIAS
+    // Adicionar / limpar (grava direto no Firestore)
     btnAddAvaria.addEventListener("click", async () => {
       if (!avData.value || !avHora.value || !avDesc.value) return alert("Preenche Data, Hora e Descrição.");
       const novo = {
-        data: avData.value,
-        hora: avHora.value,
-        tear: selectedTear,
+        data: avData.value, hora: avHora.value, tear: selectedTear,
         equipamento: (TEARES.find(t=>t.codigo===selectedTear)||{}).nome || "",
-        localizacao: "Tecelagem",
-        tipo: avTipo.value || "Outros",
-        descricao: avDesc.value,
-        tecnico: avTec.value || "",
+        localizacao: "Tecelagem", tipo: avTipo.value || "Outros",
+        descricao: avDesc.value, tecnico: avTec.value || "",
         tempoParagem: Number(avParagem.value)||0,
-        empresaId: EMPRESA_ID,
-        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        empresaId: EMPRESA_ID, createdAt: firebase.firestore.FieldValue.serverTimestamp()
       };
       await colAvarias().add(novo);
       setFormDefaults();
     });
     btnClearAvaria.addEventListener("click", setFormDefaults);
 
-    // ===== Ações ENCOMENDAS
     btnAddEncomenda.addEventListener("click", async () => {
       if (!enData.value || !enCliente.value || !enProduto.value) return alert("Preenche Data, Cliente e Produto.");
       const nova = {
-        data: enData.value,
-        cliente: enCliente.value,
-        produto: enProduto.value,
-        quantidadeM: Number(enQtd.value)||0,
-        larguraCm: Number(enLarg.value)||0,
-        prioridade: enPrior.value || "Média",
-        tear: selectedTear,
+        data: enData.value, cliente: enCliente.value, produto: enProduto.value,
+        quantidadeM: Number(enQtd.value)||0, larguraCm: Number(enLarg.value)||0,
+        prioridade: enPrior.value || "Média", tear: selectedTear,
         observacoes: enObs.value || "",
-        empresaId: EMPRESA_ID,
-        createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        empresaId: EMPRESA_ID, createdAt: firebase.firestore.FieldValue.serverTimestamp()
       };
       await colEncomendas().add(nova);
       setFormDefaults();
     });
     btnClearEncomenda.addEventListener("click", setFormDefaults);
 
-    // Delegação (duplicar/apagar) AVARIAS
-    tbAvarias.addEventListener("click", async (e) => {
-      const b = e.target.closest("button"); if (!b) return;
-      const id = b.dataset.id, act = b.dataset.act;
-      if (act === "del-av") {
-        await colAvarias().doc(id).delete();
-      } else if (act === "dup-av") {
-        const a = avarias.find(x => x.id === id); if (!a) return;
-        const copy = { ...a }; delete copy.id;
-        copy.data = todayISO(); copy.hora = nowHM(); copy.createdAt = firebase.firestore.FieldValue.serverTimestamp();
-        await colAvarias().add(copy);
-      }
+    // Delegação: duplicar/apagar (FireStore)
+    tbAvarias.addEventListener("click", async (e)=>{
+      const b=e.target.closest("button"); if(!b) return; const id=b.dataset.id, act=b.dataset.act;
+      if(act==="del-av"){ await colAvarias().doc(id).delete(); }
+      else if(act==="dup-av"){ const a=avarias.find(x=>x.id===id); if(!a)return; const copy={...a}; delete copy.id; copy.data=todayISO(); copy.hora=nowHM(); copy.createdAt=firebase.firestore.FieldValue.serverTimestamp(); await colAvarias().add(copy); }
     });
-
-    // Delegação (duplicar/apagar) ENCOMENDAS
-    tbEncomendas.addEventListener("click", async (e) => {
-      const b = e.target.closest("button"); if (!b) return;
-      const id = b.dataset.id, act = b.dataset.act;
-      if (act === "del-en") {
-        await colEncomendas().doc(id).delete();
-      } else if (act === "dup-en") {
-        const x = encomendas.find(y => y.id === id); if (!x) return;
-        const copy = { ...x }; delete copy.id;
-        copy.data = todayISO(); copy.createdAt = firebase.firestore.FieldValue.serverTimestamp();
-        await colEncomendas().add(copy);
-      }
+    tbEncomendas.addEventListener("click", async (e)=>{
+      const b=e.target.closest("button"); if(!b) return; const id=b.dataset.id, act=b.dataset.act;
+      if(act==="del-en"){ await colEncomendas().doc(id).delete(); }
+      else if(act==="dup-en"){ const x=encomendas.find(y=>y.id===id); if(!x)return; const copy={...x}; delete copy.id; copy.data=todayISO(); copy.createdAt=firebase.firestore.FieldValue.serverTimestamp(); await colEncomendas().add(copy); }
     });
 
     // Export/Import (tudo)
-    btnExportJSON.addEventListener("click", () => {
-      download("manutencao_"+todayISO()+".json", JSON.stringify({ avarias, encomendas }, null, 2), "application/json");
-    });
-    btnExportCSV.addEventListener("click", () => {
-      const csvA = toCSV(avarias) || "id,data,hora,tear,equipamento,localizacao,tipo,descricao,tecnico,tempoParagem\n";
-      const csvE = toCSV(encomendas) || "id,data,cliente,produto,quantidadeM,larguraCm,prioridade,tear,observacoes\n";
-      download("avarias.csv", csvA, "text/csv");
-      download("encomendas.csv", csvE, "text/csv");
-    });
-    importJson.addEventListener("change", async (e) => {
-      const file = e.target.files?.[0]; if (!file) return;
-      const reader = new FileReader();
-      reader.onload = async () => {
-        try {
-          const obj = JSON.parse(String(reader.result));
-          if (Array.isArray(obj.avarias)) {
-            for (const a of obj.avarias) {
-              const doc = { ...a }; delete doc.id;
-              doc.empresaId = EMPRESA_ID;
-              doc.createdAt = firebase.firestore.FieldValue.serverTimestamp();
-              await colAvarias().add(doc);
-            }
-          }
-          if (Array.isArray(obj.encomendas)) {
-            for (const en of obj.encomendas) {
-              const doc = { ...en }; delete doc.id;
-              doc.empresaId = EMPRESA_ID;
-              doc.createdAt = firebase.firestore.FieldValue.serverTimestamp();
-              await colEncomendas().add(doc);
-            }
-          }
-          alert("Importação concluída.");
-        } catch { alert("Ficheiro inválido."); }
-      };
+    btnExportJSON.addEventListener("click", () => download("manutencao_"+todayISO()+".json", JSON.stringify({ avarias, encomendas }, null, 2), "application/json"));
+    btnExportCSV.addEventListener("click", () => { const csvA=toCSV(avarias)||"id,data,hora,tear,equipamento,localizacao,tipo,descricao,tecnico,tempoParagem\n"; const csvE=toCSV(encomendas)||"id,data,cliente,produto,quantidadeM,larguraCm,prioridade,tear,observacoes\n"; download("avarias.csv", csvA, "text/csv"); download("encomendas.csv", csvE, "text/csv"); });
+    importJson.addEventListener("change", (e) => {
+      const file=e.target.files?.[0]; if(!file) return;
+      const reader=new FileReader();
+      reader.onload=async ()=>{ try{ const obj=JSON.parse(String(reader.result)); if(Array.isArray(obj.avarias)) for(const a of obj.avarias) await colAvarias().add({ ...a, empresaId:EMPRESA_ID }); if(Array.isArray(obj.encomendas)) for(const x of obj.encomendas) await colEncomendas().add({ ...x, empresaId:EMPRESA_ID }); } catch{ alert("Ficheiro inválido."); } };
       reader.readAsText(file);
     });
 
-    // Export CSV (visível) — Avarias
-    btnCsvAvariasVisivel.addEventListener("click", ()=>{
+    // Export CSV (visível) — usa filtros atuais
+    function filterByRange(list, range){
+      const today=todayISO(); let from=null,to=null;
+      if(range==="today"){ from=today; to=today; }
+      else if(range==="7d"){ from=addDaysISO(today,-6); to=today; }
+      else if(range==="month"){ from=startOfMonthISO(new Date()); to=today; }
+      return (!from||!to) ? list : list.filter(r => (r.data||"")>=from && (r.data||"")<=to);
+    }
+    document.getElementById("btnCsvAvariasVisivel").addEventListener("click",()=>{
       const base = (avScope==="tear") ? avarias.filter(a=>a.tear===selectedTear) : avarias.slice();
-      const today = todayISO();
-      let fromISO=null, toISO=null;
-      if (avRange==="today"){ fromISO=today; toISO=today; }
-      else if (avRange==="7d"){ fromISO=addDaysISO(today,-6); toISO=today; }
-      else if (avRange==="month"){ fromISO=startOfMonthISO(new Date()); toISO=today; }
-      const filtered = (!fromISO||!toISO) ? base : base.filter(a => (a.data||"")>=fromISO && (a.data||"")<=toISO);
+      const filtered = filterByRange(base, avRange);
       const csv = toCSV(filtered) || "id,data,hora,tear,equipamento,localizacao,tipo,descricao,tecnico,tempoParagem\n";
       download("avarias_visivel.csv", csv, "text/csv");
     });
+    document.getElementById("btnCsvEncomendasVisivel").addEventListener("click",()=>{
+      const base = (enScope==="tear") ? encomendas.filter(e
 
-    // Export CSV (visível) — Encomendas
-    btnCsvEncomendasVisivel.addEventListener("click", ()=>{
-      const base = (enScope==="tear") ? encomendas.filter(e=>e.tear===selectedTear) : encomendas.slice();
-      const today = todayISO();
-      let fromISO=null, toISO=null;
-      if (enRange==="today"){ fromISO=today; toISO=today; }
-      else if (enRange==="7d"){ fromISO=addDaysISO(today,-6); toISO=today; }
-      else if (enRange==="month"){ fromISO=startOfMonthISO(new Date()); toISO=today; }
-      const filtered = (!fromISO||!toISO) ? base : base.filter(e => (e.data||"")>=fromISO && (e.data||"")<=toISO);
-      const csv = toCSV(filtered) || "id,data,cliente,produto,quantidadeM,larguraCm,prioridade,tear,observacoes\n";
-      download("encomendas_visivel.csv", csv, "text/csv");
-    });
 
-    // Render com filtros
-    function renderTables() {
-      // ===== AVARIAS =====
-      const AV_LIMIT = 100;
-      const baseA = (avScope === "tear") ? avarias.filter(a => a.tear === selectedTear) : avarias.slice();
-      const today = todayISO();
-      let fromISO=null, toISO=null;
-      if (avRange==="today"){ fromISO=today; toISO=today; }
-      else if (avRange==="7d"){ fromISO=addDaysISO(today,-6); toISO=today; }
-      else if (avRange==="month"){ fromISO=startOfMonthISO(new Date()); toISO=today; }
-      const listA = (!fromISO||!toISO) ? baseA : baseA.filter(a => (a.data||"")>=fromISO && (a.data||"")<=toISO);
-
-      tbAvarias.innerHTML = "";
-      let totalA = 0;
-      listA.slice(0, AV_LIMIT).forEach(a=>{
-        totalA += Number(a.tempoParagem)||0;
-        const tr=document.createElement("tr");
-        tr.innerHTML = `
-          <td>${a.data||""}</td>
-          <td>${a.hora||""}</td>
-          <td>${a.tipo||""}</td>
-          <td title="${(a.descricao||"").replace(/"/g,'&quot;')}" style="max-width:420px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis">${a.descricao||""}</td>
-          <td>${a.tecnico||""}</td>
-          <td>${(Number(a.tempoParagem)||0).toFixed(2)}</td>
-          <td style="text-align:right">
-            <button class="btn-ghost" data-act="dup-av" data-id="${a.id}">Duplicar</button>
-            <button class="btn-ghost" data-act="del-av" data-id="${a.id}">Apagar</button>
-          </td>
-        `;
-        tbAvarias.appendChild(tr);
-      });
-      if (!listA.length) {
-        const tr=document.createElement("tr");
-        tr.innerHTML = `<td class="muted" colspan="7">Sem registos para este filtro.</td>`;
-        tbAvarias.appendChild(tr);
-      }
-      const msgA = listA.length>AV_LIMIT ? ` • a mostrar ${Math.min(AV_LIMIT,listA.length)} de ${listA.length}` : "";
-      const scopeA = (avScope==="tear")?`tear ${selectedTear}`:`todos os teares`;
-      const rangeA = avRange==="today"?"hoje":avRange==="7d"?"últimos 7 dias":avRange==="month"?"este mês":"todas as datas";
-      avResumo.textContent = `${listA.length} registos (${scopeA}, ${rangeA}) • Total visível: ${totalA.toFixed(2)} h${msgA}`;
-
-      // ===== ENCOMENDAS =====
-      const EN_LIMIT = 100;
-      const baseE = (enScope === "tear") ? encomendas.filter(e => e.tear === selectedTear) : encomendas.slice();
-      let fromISOe=null, toISOe=null;
-      if (enRange==="today"){ fromISOe=today; toISOe=today; }
-      else if (enRange==="7d"){ fromISOe=addDaysISO(today,-6); toISOe=today; }
-      else if (enRange==="month"){ fromISOe=startOfMonthISO(new Date()); toISOe=today; }
-      const listE = (!fromISOe||!toISOe) ? baseE : baseE.filter(e => (e.data||"")>=fromISOe && (e.data||"")<=toISOe);
-
-      tbEncomendas.innerHTML="";
-      listE.slice(0, EN_LIMIT).forEach(e=>{
-        const tr=document.createElement("tr");
-        tr.innerHTML = `
-          <td>${e.data||""}</td>
-          <td>${e.cliente||""}</td>
-          <td>${e.produto||""}</td>
-          <td>${e.quantidadeM||0}</td>
-          <td>${e.larguraCm||0}</td>
-          <td><span class="badge">${e.prioridade||""}</span></td>
-          <td title="${(e.observacoes||"").replace(/"/g,'&quot;')}" style="max-width:420px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis">${e.observacoes||""}</td>
-          <td style="text-align:right">
-            <button class="btn-ghost" data-act="dup-en" data-id="${e.id}">Duplicar</button>
-            <button class="btn-ghost" data-act="del-en" data-id="${e.id}">Apagar</button>
-          </td>
-        `;
-        tbEncomendas.appendChild(tr);
-      });
-      if (!listE.length){
-        const tr=document.createElement("tr");
-        tr.innerHTML = `<td class="muted" colspan="8">Sem encomendas para este filtro.</td>`;
-        tbEncomendas.appendChild(tr);
-      }
-      const msgE = listE.length>EN_LIMIT ? ` • a mostrar ${Math.min(EN_LIMIT,listE.length)} de ${listE.length}` : "";
-      enResumo.textContent = `${listE.length} registos${msgE}`;
-    }
-
-    // primeiro render com a cache local (se houver)
-    renderTables();
-
-    // Registar SW (PWA) — versão com query para quebrar cache
-    if ("serviceWorker" in navigator) {
-      window.addEventListener("load", () => {
-        navigator.serviceWorker.register("/sw.js?v=3").catch(()=>{});
-      });
-    }
-  </script>
-</body>
-</html>
