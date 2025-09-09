@@ -381,7 +381,7 @@
     // ===== Auth + realtime listeners (com erro visível)
     auth.signInAnonymously().catch((e)=>{ console.error("Auth",e); alert("Erro de autenticação Firebase:\n"+(e?.message||e)); });
     auth.onAuthStateChanged(() => {
-      colAvarias().orderBy("data","desc").orderBy("hora","desc").onSnapshot(
+      colAvarias().orderBy("createdAt", "desc").onSnapshot(
         (snap)=>{
           avarias = snap.docs.map(d => ({ id:d.id, ...d.data() })); saveLS(LS.av,avarias); renderTables();
         },
