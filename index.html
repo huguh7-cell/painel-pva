@@ -8,11 +8,9 @@
   <!-- PWA -->
   <link rel="manifest" href="/manifest.webmanifest">
   <meta name="theme-color" content="#0b1020" />
-  <!-- iOS PWA -->
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-title" content="Painel" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-  <!-- Ícone iOS (opcional) -->
   <link rel="apple-touch-icon" sizes="180x180" href="/icons/icon-180.png?v=2" />
 
   <style>
@@ -35,11 +33,15 @@
     thead th { position:sticky; top:0; background:#0f1530; }
     .scroll { max-height:360px; overflow:auto; border:1px solid #233; border-radius:8px; }
     .badge { background:#1f2a44; border-radius:6px; padding:2px 6px; font-size:12px; }
-    /* Filtros */
     .toolbar { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:8px 0 12px; }
     .btn-ghost.active { outline:2px solid #3b82f6; }
     .toolbar-spacer { color:var(--muted); }
   </style>
+
+  <!-- Firebase (compat para usar direto no HTML) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 </head>
 <body>
   <div class="wrap">
@@ -101,8 +103,6 @@
           <h3 style="margin:0">Registos (Avarias)</h3>
           <div class="muted" id="avResumo"></div>
         </div>
-
-        <!-- Filtros Avarias -->
         <div class="toolbar" id="avToolbar">
           <button class="btn-ghost" data-range="today">Hoje</button>
           <button class="btn-ghost" data-range="7d">Últimos 7 dias</button>
@@ -114,7 +114,6 @@
           <span class="toolbar-spacer">|</span>
           <button class="btn-ghost" id="btnCsvAvariasVisivel">Exportar CSV (visível)</button>
         </div>
-
         <div class="scroll">
           <table>
             <thead><tr>
@@ -156,8 +155,6 @@
           <h3 style="margin:0">Registos (Encomendas)</h3>
           <div class="muted" id="enResumo"></div>
         </div>
-
-        <!-- Filtros Encomendas -->
         <div class="toolbar" id="enToolbar">
           <button class="btn-ghost" data-range="today">Hoje</button>
           <button class="btn-ghost" data-range="7d">Últimos 7 dias</button>
@@ -169,7 +166,6 @@
           <span class="toolbar-spacer">|</span>
           <button class="btn-ghost" id="btnCsvEncomendasVisivel">Exportar CSV (visível)</button>
         </div>
-
         <div class="scroll">
           <table>
             <thead><tr>
@@ -180,11 +176,10 @@
         </div>
       </div>
     </div>
-
   </div>
 
   <script>
-    // ---- Helpers / Estado base
+    // ===== Helpers/UI =====
     const TEARES = Array.from({ length: 112 }, (_, i) => ({
       codigo: "TEC-" + String(i + 1).padStart(3, "0"),
       nome: "Tear " + String(i + 1).padStart(2, "0"),
@@ -205,8 +200,26 @@
       const blob=new Blob([text],{type}); const url=URL.createObjectURL(blob);
       const a=document.createElement("a"); a.href=url; a.download=name; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
     }
+    function saveLS(key, value){ localStorage.setItem(key, JSON.stringify(value)); }
+    function loadLS(key, fallback){ try{ return JSON.parse(localStorage.getItem(key) || JSON.stringify(fallback)); } catch{ return fallback; } }
 
-    // ---- Elementos
+    // ===== Firebase =====
+    const firebaseConfig = {
+      apiKey: "AIzaSyDLmIafdPeq6Aq5ZVeng6v5jJviDqs4rDk",
+      authDomain: "painel-ada.firebaseapp.com",
+      projectId: "painel-ada",
+      storageBucket: "painel-ada.firebasestorage.app",
+      messagingSenderId: "10091976296",
+      appId: "1:10091976296:web:6d4de4c127e32431274ddd",
+      measurementId: "G-XH2RYBTKX5"
+    };
+    const EMPRESA_ID = "ADA"; // <- troca aqui se quiseres outro identificador
+
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+    const auth = firebase.auth();
+
+    // ===== Estado / elementos
     const selTear = document.getElementById("selTear");
     const inpTearNome = document.getElementById("inpTearNome");
 
@@ -242,23 +255,15 @@
     const btnExportCSV = document.getElementById("btnExportCSV");
     const importJson = document.getElementById("importJson");
 
-    // ---- LS
-    function loadLS(key, fallback){ try{ return JSON.parse(localStorage.getItem(key) || JSON.stringify(fallback)); } catch{ return fallback; } }
-    function saveLS(key, value){ localStorage.setItem(key, JSON.stringify(value)); }
-
-    let avarias = loadLS(LS.av, []);
-    let encomendas = loadLS(LS.en, []);
-    let selectedTear = localStorage.getItem(LS.sel) || TEARES[0].codigo;
-
-    // Dropdown teares
+    // povoar dropdown de teares
     TEARES.forEach(t => {
       const opt = document.createElement("option");
       opt.value = t.codigo; opt.textContent = `${t.codigo} — ${t.nome}`;
       selTear.appendChild(opt);
     });
+    let selectedTear = localStorage.getItem(LS.sel) || TEARES[0].codigo;
     selTear.value = selectedTear;
     inpTearNome.value = (TEARES.find(t=>t.codigo===selectedTear)||{}).nome || "";
-
     selTear.addEventListener("change", () => {
       selectedTear = selTear.value;
       localStorage.setItem(LS.sel, selectedTear);
@@ -272,9 +277,30 @@
     }
     setFormDefaults();
 
-    // ---- Filtros (Avarias)
-    let avRange = "all";   // today | 7d | month | all
-    let avScope = "tear";  // tear  | all
+    // ===== Firestore helpers
+    const colAvarias = () => db.collection("companies").doc(EMPRESA_ID).collection("avarias");
+    const colEncomendas = () => db.collection("companies").doc(EMPRESA_ID).collection("encomendas");
+
+    // login anónimo e listeners em tempo real
+    let avarias = loadLS(LS.av, []);       // cache inicial
+    let encomendas = loadLS(LS.en, []);    // cache inicial
+    auth.signInAnonymously().catch(console.error);
+    auth.onAuthStateChanged(() => {
+      // ordenar por createdAt (evita criar índices compostos)
+      colAvarias().orderBy("createdAt","desc").onSnapshot((snap)=>{
+        avarias = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        saveLS(LS.av, avarias);
+        renderTables();
+      });
+      colEncomendas().orderBy("createdAt","desc").onSnapshot((snap)=>{
+        encomendas = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        saveLS(LS.en, encomendas);
+        renderTables();
+      });
+    });
+
+    // ===== Filtros Avarias
+    let avRange = "all", avScope = "tear";
     if (avToolbar){
       avToolbar.addEventListener("click", (e)=>{
         const b=e.target.closest("button"); if(!b) return;
@@ -291,9 +317,8 @@
       });
     }
 
-    // ---- Filtros (Encomendas)
-    let enRange = "all";   // today | 7d | month | all
-    let enScope = "tear";  // tear  | all
+    // ===== Filtros Encomendas
+    let enRange = "all", enScope = "tear";
     if (enToolbar){
       enToolbar.addEventListener("click", (e)=>{
         const b=e.target.closest("button"); if(!b) return;
@@ -310,11 +335,10 @@
       });
     }
 
-    // ---- Ações
-    btnAddAvaria.addEventListener("click", () => {
+    // ===== Ações AVARIAS
+    btnAddAvaria.addEventListener("click", async () => {
       if (!avData.value || !avHora.value || !avDesc.value) return alert("Preenche Data, Hora e Descrição.");
       const novo = {
-        id: uid(),
         data: avData.value,
         hora: avHora.value,
         tear: selectedTear,
@@ -323,19 +347,19 @@
         tipo: avTipo.value || "Outros",
         descricao: avDesc.value,
         tecnico: avTec.value || "",
-        tempoParagem: Number(avParagem.value)||0
+        tempoParagem: Number(avParagem.value)||0,
+        empresaId: EMPRESA_ID,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
       };
-      avarias = [novo, ...avarias];
-      saveLS(LS.av, avarias);
+      await colAvarias().add(novo);
       setFormDefaults();
-      renderTables();
     });
     btnClearAvaria.addEventListener("click", setFormDefaults);
 
-    btnAddEncomenda.addEventListener("click", () => {
+    // ===== Ações ENCOMENDAS
+    btnAddEncomenda.addEventListener("click", async () => {
       if (!enData.value || !enCliente.value || !enProduto.value) return alert("Preenche Data, Cliente e Produto.");
       const nova = {
-        id: uid(),
         data: enData.value,
         cliente: enCliente.value,
         produto: enProduto.value,
@@ -343,38 +367,40 @@
         larguraCm: Number(enLarg.value)||0,
         prioridade: enPrior.value || "Média",
         tear: selectedTear,
-        observacoes: enObs.value || ""
+        observacoes: enObs.value || "",
+        empresaId: EMPRESA_ID,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp()
       };
-      encomendas = [nova, ...encomendas];
-      saveLS(LS.en, encomendas);
+      await colEncomendas().add(nova);
       setFormDefaults();
-      renderTables();
     });
     btnClearEncomenda.addEventListener("click", setFormDefaults);
 
-    // Tabelas - duplicar/apagar via delegação
-    tbAvarias.addEventListener("click", (e) => {
+    // Delegação (duplicar/apagar) AVARIAS
+    tbAvarias.addEventListener("click", async (e) => {
       const b = e.target.closest("button"); if (!b) return;
       const id = b.dataset.id, act = b.dataset.act;
       if (act === "del-av") {
-        avarias = avarias.filter(a => a.id !== id);
-        saveLS(LS.av, avarias); renderTables();
+        await colAvarias().doc(id).delete();
       } else if (act === "dup-av") {
         const a = avarias.find(x => x.id === id); if (!a) return;
-        const copy = { ...a, id: uid(), data: todayISO(), hora: nowHM() };
-        avarias = [copy, ...avarias]; saveLS(LS.av, avarias); renderTables();
+        const copy = { ...a }; delete copy.id;
+        copy.data = todayISO(); copy.hora = nowHM(); copy.createdAt = firebase.firestore.FieldValue.serverTimestamp();
+        await colAvarias().add(copy);
       }
     });
-    tbEncomendas.addEventListener("click", (e) => {
+
+    // Delegação (duplicar/apagar) ENCOMENDAS
+    tbEncomendas.addEventListener("click", async (e) => {
       const b = e.target.closest("button"); if (!b) return;
       const id = b.dataset.id, act = b.dataset.act;
       if (act === "del-en") {
-        encomendas = encomendas.filter(x => x.id !== id);
-        saveLS(LS.en, encomendas); renderTables();
+        await colEncomendas().doc(id).delete();
       } else if (act === "dup-en") {
         const x = encomendas.find(y => y.id === id); if (!x) return;
-        const copy = { ...x, id: uid(), data: todayISO() };
-        encomendas = [copy, ...encomendas]; saveLS(LS.en, encomendas); renderTables();
+        const copy = { ...x }; delete copy.id;
+        copy.data = todayISO(); copy.createdAt = firebase.firestore.FieldValue.serverTimestamp();
+        await colEncomendas().add(copy);
       }
     });
 
@@ -388,16 +414,29 @@
       download("avarias.csv", csvA, "text/csv");
       download("encomendas.csv", csvE, "text/csv");
     });
-    importJson.addEventListener("change", (e) => {
+    importJson.addEventListener("change", async (e) => {
       const file = e.target.files?.[0]; if (!file) return;
       const reader = new FileReader();
-      reader.onload = () => {
+      reader.onload = async () => {
         try {
           const obj = JSON.parse(String(reader.result));
-          if (Array.isArray(obj.avarias)) avarias = obj.avarias;
-          if (Array.isArray(obj.encomendas)) encomendas = obj.encomendas;
-          saveLS(LS.av, avarias); saveLS(LS.en, encomendas);
-          renderTables();
+          if (Array.isArray(obj.avarias)) {
+            for (const a of obj.avarias) {
+              const doc = { ...a }; delete doc.id;
+              doc.empresaId = EMPRESA_ID;
+              doc.createdAt = firebase.firestore.FieldValue.serverTimestamp();
+              await colAvarias().add(doc);
+            }
+          }
+          if (Array.isArray(obj.encomendas)) {
+            for (const en of obj.encomendas) {
+              const doc = { ...en }; delete doc.id;
+              doc.empresaId = EMPRESA_ID;
+              doc.createdAt = firebase.firestore.FieldValue.serverTimestamp();
+              await colEncomendas().add(doc);
+            }
+          }
+          alert("Importação concluída.");
         } catch { alert("Ficheiro inválido."); }
       };
       reader.readAsText(file);
@@ -447,9 +486,9 @@
         totalA += Number(a.tempoParagem)||0;
         const tr=document.createElement("tr");
         tr.innerHTML = `
-          <td>${a.data}</td>
-          <td>${a.hora}</td>
-          <td>${a.tipo}</td>
+          <td>${a.data||""}</td>
+          <td>${a.hora||""}</td>
+          <td>${a.tipo||""}</td>
           <td title="${(a.descricao||"").replace(/"/g,'&quot;')}" style="max-width:420px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis">${a.descricao||""}</td>
           <td>${a.tecnico||""}</td>
           <td>${(Number(a.tempoParagem)||0).toFixed(2)}</td>
@@ -483,12 +522,12 @@
       listE.slice(0, EN_LIMIT).forEach(e=>{
         const tr=document.createElement("tr");
         tr.innerHTML = `
-          <td>${e.data}</td>
-          <td>${e.cliente}</td>
-          <td>${e.produto}</td>
-          <td>${e.quantidadeM}</td>
-          <td>${e.larguraCm}</td>
-          <td><span class="badge">${e.prioridade}</span></td>
+          <td>${e.data||""}</td>
+          <td>${e.cliente||""}</td>
+          <td>${e.produto||""}</td>
+          <td>${e.quantidadeM||0}</td>
+          <td>${e.larguraCm||0}</td>
+          <td><span class="badge">${e.prioridade||""}</span></td>
           <td title="${(e.observacoes||"").replace(/"/g,'&quot;')}" style="max-width:420px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis">${e.observacoes||""}</td>
           <td style="text-align:right">
             <button class="btn-ghost" data-act="dup-en" data-id="${e.id}">Duplicar</button>
@@ -506,13 +545,13 @@
       enResumo.textContent = `${listE.length} registos${msgE}`;
     }
 
-    // Primeiro render
+    // primeiro render com a cache local (se houver)
     renderTables();
 
-    // Registar SW (PWA)
+    // Registar SW (PWA) — versão com query para quebrar cache
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", () => {
-        navigator.serviceWorker.register("/sw.js").catch(()=>{});
+        navigator.serviceWorker.register("/sw.js?v=3").catch(()=>{});
       });
     }
   </script>
